@@ -1,0 +1,99 @@
+/**
+ * Express application factory for Project Pay.
+ * Configures middleware, API routes, 404 fallback, and secure error handling.
+ */
+
+import express from 'express';
+import { ZodError } from 'zod';
+import { createDatabase } from './db/connection.js';
+import { initDatabase } from './db/init.js';
+import { createStudentRouter } from './routes/students.js';
+import { createPaymentRouter } from './routes/payments.js';
+import { createReportRouter } from './routes/reports.js';
+
+/**
+ * Creates and configures the Express application.
+ *
+ * @param {import('better-sqlite3').Database} [database] - Optional database instance.
+ * @returns {import('express').Application}
+ */
+export function createApp(database) {
+  const db = database || initDatabase(createDatabase());
+
+  const app = express();
+
+  // Attach database connection to req for convenience
+  app.use((req, res, next) => {
+    req.db = db;
+    next();
+  });
+
+  // Safe JSON body parser with 100kb payload limit
+  app.use(express.json({ limit: '100kb' }));
+
+  // API Routes
+  app.use('/api/students', createStudentRouter(db));
+  app.use('/api/payments', createPaymentRouter(db));
+  app.use('/api/reports', createReportRouter(db));
+
+  // Consistent JSON 404 for unknown routes
+  app.use((req, res) => {
+    res.status(404).json({
+      error: 'Not Found',
+      message: `Cannot ${req.method} ${req.originalUrl}`
+    });
+  });
+
+  // Central error handling middleware
+  app.use((err, req, res, next) => {
+    // Malformed JSON body from express.json()
+    if (err.type === 'entity.parse.failed' || (err instanceof SyntaxError && 'body' in err)) {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'Malformed JSON in request body'
+      });
+    }
+
+    // Payload size exceeded limit
+    if (err.type === 'entity.too.large') {
+      return res.status(413).json({
+        error: 'Payload Too Large',
+        message: 'Request payload too large'
+      });
+    }
+
+    // Zod validation errors
+    if (err instanceof ZodError) {
+      const messages = err.issues.map((i) => i.message).filter(Boolean);
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: messages.join('; ') || 'Validation failed',
+        details: err.issues
+      });
+    }
+
+    // Financial / integer range errors
+    if (err instanceof RangeError) {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: err.message
+      });
+    }
+
+    // SQLite foreign key conflicts caught unexpectedly
+    if (err.message && err.message.includes('FOREIGN KEY constraint failed')) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'Foreign key constraint violation'
+      });
+    }
+
+    // Default 500 error: sanitize completely to never leak SQL, paths, or secrets
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'An unexpected error occurred'
+    });
+  });
+
+  return app;
+}

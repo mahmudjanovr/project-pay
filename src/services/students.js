@@ -2,7 +2,7 @@
  * Student service providing parameterized CRUD operations with application-level validation.
  */
 
-import { validateStudentInput, idSchema } from '../validators/index.js';
+import { validateStudentInput, validateUpdateStudentInput, idSchema } from '../validators/index.js';
 import { getCurrentUtcIsoString } from '../utils/date.js';
 
 /**
@@ -56,6 +56,39 @@ export function listStudents(db) {
     'SELECT id, full_name, monthly_fee, created_at FROM students ORDER BY id ASC'
   );
   return stmt.all();
+}
+
+/**
+ * Updates a student record partially.
+ *
+ * @param {import('better-sqlite3').Database} db
+ * @param {number} id
+ * @param {{ full_name?: string, monthly_fee?: number }} data
+ * @returns {{ id: number, full_name: string, monthly_fee: number, created_at: string } | null}
+ */
+export function updateStudent(db, id, data) {
+  const validId = idSchema.parse(id);
+  const validated = validateUpdateStudentInput(data);
+
+  const existing = getStudentById(db, validId);
+  if (!existing) {
+    return null;
+  }
+
+  const newFullName = validated.full_name !== undefined ? validated.full_name : existing.full_name;
+  const newMonthlyFee = validated.monthly_fee !== undefined ? validated.monthly_fee : existing.monthly_fee;
+
+  const stmt = db.prepare(
+    'UPDATE students SET full_name = ?, monthly_fee = ? WHERE id = ?'
+  );
+  stmt.run(newFullName, newMonthlyFee, validId);
+
+  return {
+    id: existing.id,
+    full_name: newFullName,
+    monthly_fee: newMonthlyFee,
+    created_at: existing.created_at
+  };
 }
 
 /**

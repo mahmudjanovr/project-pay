@@ -90,12 +90,62 @@ export const idSchema = z.number({
   });
 
 /**
+ * Validates route parameter string ID (e.g. req.params.id) and converts to safe integer.
+ */
+export const routeIdSchema = z.string({
+  message: 'Route parameter ID must be a string'
+})
+  .regex(/^[1-9]\d*$/, {
+    message: 'Route parameter ID must be a positive integer'
+  })
+  .transform((val) => Number(val))
+  .refine((val) => Number.isSafeInteger(val) && val > 0, {
+    message: 'Route parameter ID must be a positive safe integer'
+  });
+
+/**
+ * Parses and validates route parameter ID.
+ *
+ * @param {unknown} param
+ * @returns {number}
+ */
+export function parseRouteId(param) {
+  return routeIdSchema.parse(param);
+}
+
+/**
  * Schema for creating a student record.
  */
 export const createStudentSchema = z.object({
   full_name: studentNameSchema,
   monthly_fee: monthlyFeeSchema
 }).strict();
+
+/**
+ * Schema for updating a student record partially.
+ * Rejects empty updates and unrecognized keys.
+ */
+export const updateStudentSchema = z.object({
+  full_name: studentNameSchema.optional(),
+  monthly_fee: monthlyFeeSchema.optional()
+})
+  .strict()
+  .refine(
+    (data) => data.full_name !== undefined || data.monthly_fee !== undefined,
+    {
+      message: 'At least one field (full_name or monthly_fee) must be provided for update'
+    }
+  );
+
+/**
+ * Validates partial student update input fields.
+ *
+ * @param {unknown} input
+ * @returns {{ full_name?: string, monthly_fee?: number }}
+ */
+export function validateUpdateStudentInput(input) {
+  return updateStudentSchema.parse(input);
+}
 
 /**
  * Schema for creating a payment record.

@@ -7,6 +7,7 @@ import {
   createStudent,
   getStudentById,
   listStudents,
+  updateStudent,
   deleteStudent
 } from '../src/services/students.js';
 import {
@@ -44,6 +45,30 @@ test('Student service operations', async (t) => {
     for (let i = 1; i < students.length; i++) {
       assert.ok(students[i].id > students[i - 1].id, 'Students must be ordered by id ascending');
     }
+  });
+
+  await t.test('updates student partially and preserves omitted fields', () => {
+    const original = createStudent(db, { full_name: 'Original Name', monthly_fee: 800000 });
+
+    // Update name only
+    const updatedName = updateStudent(db, original.id, { full_name: 'New Name' });
+    assert.ok(updatedName);
+    assert.equal(updatedName.full_name, 'New Name');
+    assert.equal(updatedName.monthly_fee, 800000); // Preserved
+    assert.equal(updatedName.created_at, original.created_at);
+
+    // Update fee only
+    const updatedFee = updateStudent(db, original.id, { monthly_fee: 1200000 });
+    assert.ok(updatedFee);
+    assert.equal(updatedFee.full_name, 'New Name'); // Preserved
+    assert.equal(updatedFee.monthly_fee, 1200000);
+
+    // Update non-existent student
+    const notFound = updateStudent(db, 99999, { full_name: 'Ghost' });
+    assert.equal(notFound, null);
+
+    // Reject empty update
+    assert.throws(() => updateStudent(db, original.id, {}), /At least one field/);
   });
 
   await t.test('rejects invalid student inputs', () => {

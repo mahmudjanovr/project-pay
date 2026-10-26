@@ -1,6 +1,6 @@
 /**
- * Project Pay — Phase 1: Database Foundation and Business Rules
- * Main entry point re-exporting connection, initialization, schemas, and services.
+ * Project Pay — Backend API & Business Foundation
+ * Main entry point re-exporting connection, initialization, schemas, services, and Express app.
  */
 
 export { createDatabase } from './db/connection.js';
@@ -13,9 +13,14 @@ export {
   paymentAmountSchema,
   paymentDateSchema,
   reportMonthSchema,
+  idSchema,
+  routeIdSchema,
   createStudentSchema,
+  updateStudentSchema,
   createPaymentSchema,
+  parseRouteId,
   validateStudentInput,
+  validateUpdateStudentInput,
   validatePaymentInput,
   validateStudentName,
   validateMonthlyFee,
@@ -37,6 +42,7 @@ export {
   createStudent,
   getStudentById,
   listStudents,
+  updateStudent,
   deleteStudent
 } from './services/students.js';
 
@@ -50,3 +56,9 @@ export {
   getMonthlyDebtors,
   MONTHLY_DEBTORS_QUERY
 } from './services/debtors.js';
+
+export { createApp } from './app.js';
+export { startServer, PORT, DB_PATH } from './server.js';
+export { createStudentRouter } from './routes/students.js';
+export { createPaymentRouter } from './routes/payments.js';
+export { createReportRouter } from './routes/reports.js';
