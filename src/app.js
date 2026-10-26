@@ -10,6 +10,7 @@ import { ZodError } from 'zod';
 import { createDatabase } from './db/connection.js';
 import { initDatabase } from './db/init.js';
 import { createStudentRouter } from './routes/students.js';
+import { createGroupRouter } from './routes/groups.js';
 import { createPaymentRouter } from './routes/payments.js';
 import { createReportRouter } from './routes/reports.js';
 
@@ -39,6 +40,7 @@ export function createApp(database) {
 
   // API Routes
   app.use('/api/students', createStudentRouter(db));
+  app.use('/api/groups', createGroupRouter(db));
   app.use('/api/payments', createPaymentRouter(db));
   app.use('/api/reports', createReportRouter(db));
 

@@ -15,18 +15,14 @@ import { getCurrentUtcIsoString } from '../utils/date.js';
 export function createStudent(db, data) {
   const validated = validateStudentInput(data);
   const createdAt = getCurrentUtcIsoString();
+  const groupId = validated.group_id ?? null;
 
   const stmt = db.prepare(
-    'INSERT INTO students (full_name, monthly_fee, created_at) VALUES (?, ?, ?)'
+    'INSERT INTO students (full_name, monthly_fee, created_at, group_id) VALUES (?, ?, ?, ?)'
   );
-  const info = stmt.run(validated.full_name, validated.monthly_fee, createdAt);
+  const info = stmt.run(validated.full_name, validated.monthly_fee, createdAt, groupId);
 
-  return {
-    id: Number(info.lastInsertRowid),
-    full_name: validated.full_name,
-    monthly_fee: validated.monthly_fee,
-    created_at: createdAt
-  };
+  return getStudentById(db, Number(info.lastInsertRowid));
 }
 
 /**
@@ -34,13 +30,22 @@ export function createStudent(db, data) {
  *
  * @param {import('better-sqlite3').Database} db
  * @param {number} id
- * @returns {{ id: number, full_name: string, monthly_fee: number, created_at: string } | null}
+ * @returns {{ id: number, full_name: string, monthly_fee: number, created_at: string, group_id: number|null, group_name: string|null } | null}
  */
 export function getStudentById(db, id) {
   const validId = idSchema.parse(id);
-  const stmt = db.prepare(
-    'SELECT id, full_name, monthly_fee, created_at FROM students WHERE id = ?'
-  );
+  const stmt = db.prepare(`
+    SELECT
+      s.id,
+      s.full_name,
+      s.monthly_fee,
+      s.created_at,
+      s.group_id,
+      g.name AS group_name
+    FROM students s
+    LEFT JOIN groups g ON g.id = s.group_id
+    WHERE s.id = ?
+  `);
   const row = stmt.get(validId);
   return row || null;
 }
@@ -49,12 +54,21 @@ export function getStudentById(db, id) {
  * Retrieves all students ordered by ID.
  *
  * @param {import('better-sqlite3').Database} db
- * @returns {Array<{ id: number, full_name: string, monthly_fee: number, created_at: string }>}
+ * @returns {Array<{ id: number, full_name: string, monthly_fee: number, created_at: string, group_id: number|null, group_name: string|null }>}
  */
 export function listStudents(db) {
-  const stmt = db.prepare(
-    'SELECT id, full_name, monthly_fee, created_at FROM students ORDER BY id ASC'
-  );
+  const stmt = db.prepare(`
+    SELECT
+      s.id,
+      s.full_name,
+      s.monthly_fee,
+      s.created_at,
+      s.group_id,
+      g.name AS group_name
+    FROM students s
+    LEFT JOIN groups g ON g.id = s.group_id
+    ORDER BY s.id ASC
+  `);
   return stmt.all();
 }
 
@@ -63,8 +77,8 @@ export function listStudents(db) {
  *
  * @param {import('better-sqlite3').Database} db
  * @param {number} id
- * @param {{ full_name?: string, monthly_fee?: number }} data
- * @returns {{ id: number, full_name: string, monthly_fee: number, created_at: string } | null}
+ * @param {{ full_name?: string, monthly_fee?: number, group_id?: number|null }} data
+ * @returns {{ id: number, full_name: string, monthly_fee: number, created_at: string, group_id: number|null, group_name: string|null } | null}
  */
 export function updateStudent(db, id, data) {
   const validId = idSchema.parse(id);
@@ -77,18 +91,14 @@ export function updateStudent(db, id, data) {
 
   const newFullName = validated.full_name !== undefined ? validated.full_name : existing.full_name;
   const newMonthlyFee = validated.monthly_fee !== undefined ? validated.monthly_fee : existing.monthly_fee;
+  const newGroupId = validated.group_id !== undefined ? validated.group_id : existing.group_id;
 
   const stmt = db.prepare(
-    'UPDATE students SET full_name = ?, monthly_fee = ? WHERE id = ?'
+    'UPDATE students SET full_name = ?, monthly_fee = ?, group_id = ? WHERE id = ?'
   );
-  stmt.run(newFullName, newMonthlyFee, validId);
+  stmt.run(newFullName, newMonthlyFee, newGroupId, validId);
 
-  return {
-    id: existing.id,
-    full_name: newFullName,
-    monthly_fee: newMonthlyFee,
-    created_at: existing.created_at
-  };
+  return getStudentById(db, validId);
 }
 
 /**

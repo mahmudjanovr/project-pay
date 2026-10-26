@@ -13,12 +13,19 @@ export {
   paymentAmountSchema,
   paymentDateSchema,
   reportMonthSchema,
+  groupNameSchema,
+  groupIdSchema,
   idSchema,
   routeIdSchema,
+  createGroupSchema,
+  updateGroupSchema,
   createStudentSchema,
   updateStudentSchema,
   createPaymentSchema,
   parseRouteId,
+  validateGroupInput,
+  validateUpdateGroupInput,
+  validateGroupName,
   validateStudentInput,
   validateUpdateStudentInput,
   validatePaymentInput,
@@ -47,6 +54,14 @@ export {
 } from './services/students.js';
 
 export {
+  createGroup,
+  getGroupById,
+  listGroups,
+  updateGroup,
+  deleteGroup
+} from './services/groups.js';
+
+export {
   createPayment,
   getPaymentsByStudent,
   listPayments
@@ -60,5 +75,7 @@ export {
 export { createApp } from './app.js';
 export { startServer, PORT, DB_PATH } from './server.js';
 export { createStudentRouter } from './routes/students.js';
+export { createGroupRouter } from './routes/groups.js';
 export { createPaymentRouter } from './routes/payments.js';
 export { createReportRouter } from './routes/reports.js';
+

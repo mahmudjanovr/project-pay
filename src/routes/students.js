@@ -38,6 +38,12 @@ export function createStudentRouter(db) {
       const student = createStudent(db, req.body);
       res.status(201).json(student);
     } catch (err) {
+      if (err.message && err.message.includes('FOREIGN KEY constraint failed')) {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: 'Referenced group does not exist'
+        });
+      }
       next(err);
     }
   });
@@ -72,6 +78,12 @@ export function createStudentRouter(db) {
       }
       res.status(200).json(updated);
     } catch (err) {
+      if (err.message && err.message.includes('FOREIGN KEY constraint failed')) {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: 'Referenced group does not exist'
+        });
+      }
       next(err);
     }
   });

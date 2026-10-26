@@ -114,11 +114,44 @@ export function parseRouteId(param) {
 }
 
 /**
+ * Validates group name:
+ * - Must be a string.
+ * - Whitespace is trimmed.
+ * - Must not be empty after trimming.
+ */
+export const groupNameSchema = z.string({
+  message: 'Group name must be a string'
+})
+  .trim()
+  .min(1, { message: 'Group name cannot be empty' });
+
+/**
+ * Validates group ID:
+ * - Must be a positive safe integer or null.
+ */
+export const groupIdSchema = idSchema.nullable();
+
+/**
+ * Schema for creating a group record.
+ */
+export const createGroupSchema = z.object({
+  name: groupNameSchema
+}).strict();
+
+/**
+ * Schema for updating a group record.
+ */
+export const updateGroupSchema = z.object({
+  name: groupNameSchema
+}).strict();
+
+/**
  * Schema for creating a student record.
  */
 export const createStudentSchema = z.object({
   full_name: studentNameSchema,
-  monthly_fee: monthlyFeeSchema
+  monthly_fee: monthlyFeeSchema,
+  group_id: groupIdSchema.optional()
 }).strict();
 
 /**
@@ -127,13 +160,14 @@ export const createStudentSchema = z.object({
  */
 export const updateStudentSchema = z.object({
   full_name: studentNameSchema.optional(),
-  monthly_fee: monthlyFeeSchema.optional()
+  monthly_fee: monthlyFeeSchema.optional(),
+  group_id: groupIdSchema.optional()
 })
   .strict()
   .refine(
-    (data) => data.full_name !== undefined || data.monthly_fee !== undefined,
+    (data) => data.full_name !== undefined || data.monthly_fee !== undefined || data.group_id !== undefined,
     {
-      message: 'At least one field (full_name or monthly_fee) must be provided for update'
+      message: 'At least one field (full_name, monthly_fee, or group_id) must be provided for update'
     }
   );
 
@@ -141,10 +175,40 @@ export const updateStudentSchema = z.object({
  * Validates partial student update input fields.
  *
  * @param {unknown} input
- * @returns {{ full_name?: string, monthly_fee?: number }}
+ * @returns {{ full_name?: string, monthly_fee?: number, group_id?: number|null }}
  */
 export function validateUpdateStudentInput(input) {
   return updateStudentSchema.parse(input);
+}
+
+/**
+ * Validates group creation input fields.
+ *
+ * @param {unknown} input
+ * @returns {{ name: string }}
+ */
+export function validateGroupInput(input) {
+  return createGroupSchema.parse(input);
+}
+
+/**
+ * Validates group update input fields.
+ *
+ * @param {unknown} input
+ * @returns {{ name: string }}
+ */
+export function validateUpdateGroupInput(input) {
+  return updateGroupSchema.parse(input);
+}
+
+/**
+ * Validates group name value.
+ *
+ * @param {unknown} name
+ * @returns {string}
+ */
+export function validateGroupName(name) {
+  return groupNameSchema.parse(name);
 }
 
 /**

@@ -48,7 +48,9 @@ export async function renderStudentDetail(container, studentId) {
           }, '← O\'quvchilar ro\'yxatiga qaytish')
         ),
         el('h1', { className: 'page-title' }, student.full_name),
-        el('p', { className: 'page-description' }, `ID: ${student.id} | Ro'yxatdan o'tgan sana: ${formatDate(student.created_at)}`)
+        el('p', { className: 'page-description' },
+          `ID: ${student.id} | Guruh: ${student.group_name || 'Guruhsiz'} | Ro'yxatdan o'tgan sana: ${formatDate(student.created_at)}`
+        )
       ),
       el('div', { className: 'page-actions' },
         el('a', {
@@ -60,6 +62,15 @@ export async function renderStudentDetail(container, studentId) {
 
     // Student Info Card
     const infoGrid = el('div', { className: 'stats-grid' },
+      el('div', { className: 'stat-card' },
+        el('span', { className: 'stat-label' }, 'Biriktirilgan guruh'),
+        el('div', { className: 'stat-value', style: 'font-size: 1.25rem;' },
+          student.group_name ? student.group_name : 'Guruhsiz'
+        ),
+        el('span', { className: 'stat-desc' },
+          student.group_name ? 'O\'quvchi faol o\'quv guruhi' : 'Guruhga biriktirilmagan'
+        )
+      ),
       el('div', { className: 'stat-card' },
         el('span', { className: 'stat-label' }, 'Oylik to\'lov stavkasi'),
         el('div', { className: 'stat-value' }, formatUzbekSom(student.monthly_fee)),

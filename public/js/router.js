@@ -6,6 +6,7 @@
 import { renderDashboard } from './views/dashboard.js';
 import { renderStudents } from './views/students.js';
 import { renderStudentDetail } from './views/studentDetail.js';
+import { renderGroups } from './views/groups.js';
 import { renderPayments } from './views/payments.js';
 import { renderDebtors } from './views/debtors.js';
 
@@ -20,6 +21,7 @@ export class Router {
       { pattern: /^#\/dashboard\/?$/, handler: () => renderDashboard(this.container), navId: 'nav-dashboard' },
       { pattern: /^#\/students\/?$/, handler: (params) => renderStudents(this.container, params), navId: 'nav-students' },
       { pattern: /^#\/students\/(\d+)\/?$/, handler: (params, match) => renderStudentDetail(this.container, match[1]), navId: 'nav-students' },
+      { pattern: /^#\/groups\/?$/, handler: (params) => renderGroups(this.container, params), navId: 'nav-groups' },
       { pattern: /^#\/payments\/?$/, handler: (params) => renderPayments(this.container, params), navId: 'nav-payments' },
       { pattern: /^#\/debtors\/?$/, handler: (params) => renderDebtors(this.container, params), navId: 'nav-debtors' }
     ];

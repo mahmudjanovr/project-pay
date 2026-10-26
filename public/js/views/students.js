@@ -1,9 +1,9 @@
 /**
  * Students Management View for Project Pay.
- * Provides student listing, real-time filtering, adding, editing, and deletion with conflict safety.
+ * Provides student listing with group tags, real-time filtering, adding, editing, and deletion with conflict safety.
  */
 
-import { fetchStudents, createStudent, updateStudent, deleteStudent } from '../api.js';
+import { fetchStudents, fetchGroups, createStudent, updateStudent, deleteStudent } from '../api.js';
 import { formatUzbekSom, formatDate } from '../formatters.js';
 import { el, clearElement } from '../dom.js';
 import { openModal, closeModal } from '../modal.js';
@@ -25,7 +25,10 @@ export async function renderStudents(container, queryParams = new URLSearchParam
   container.appendChild(loadingEl);
 
   try {
-    const students = await fetchStudents();
+    const [students, groups] = await Promise.all([
+      fetchStudents(),
+      fetchGroups()
+    ]);
     clearElement(container);
 
     let currentFilter = '';
@@ -40,7 +43,7 @@ export async function renderStudents(container, queryParams = new URLSearchParam
         el('button', {
           type: 'button',
           className: 'btn btn-primary',
-          onClick: () => showAddStudentModal(() => renderStudents(container))
+          onClick: () => showAddStudentModal(groups, () => renderStudents(container))
         }, '+ Yangi o\'quvchi qo\'shish')
       )
     );
@@ -92,7 +95,7 @@ export async function renderStudents(container, queryParams = new URLSearchParam
               el('p', { className: 'empty-state-description' }, 'Markazga birinchi o\'quvchini ro\'yxatdan o\'tkazing.'),
               el('button', {
                 className: 'btn btn-primary btn-sm',
-                onClick: () => showAddStudentModal(() => renderStudents(container))
+                onClick: () => showAddStudentModal(groups, () => renderStudents(container))
               }, '+ O\'quvchi qo\'shish')
             )
           );
@@ -117,6 +120,11 @@ export async function renderStudents(container, queryParams = new URLSearchParam
                 style: 'color: var(--text-primary); text-decoration: none;'
               }, student.full_name)
             ),
+            el('td', {},
+              student.group_name
+                ? el('span', { className: 'badge-group' }, student.group_name)
+                : el('span', { style: 'color: var(--text-muted); font-size: 0.8125rem;' }, '—')
+            ),
             el('td', { className: 'col-numeric' }, formatUzbekSom(student.monthly_fee)),
             el('td', { style: 'color: var(--text-muted); font-size: 0.8125rem;' }, formatDate(student.created_at)),
             el('td', { className: 'col-actions' },
@@ -130,7 +138,7 @@ export async function renderStudents(container, queryParams = new URLSearchParam
                   type: 'button',
                   className: 'btn btn-secondary btn-sm',
                   title: 'Tahrirlash',
-                  onClick: () => showEditStudentModal(student, () => renderStudents(container))
+                  onClick: () => showEditStudentModal(student, groups, () => renderStudents(container))
                 }, 'Tahrirlash'),
                 el('button', {
                   type: 'button',
@@ -149,6 +157,7 @@ export async function renderStudents(container, queryParams = new URLSearchParam
           el('thead', {},
             el('tr', {},
               el('th', {}, 'F.I.SH.'),
+              el('th', {}, 'Guruh'),
               el('th', { className: 'col-numeric' }, 'Oylik to\'lov'),
               el('th', {}, 'Qo\'shilgan sana'),
               el('th', { className: 'col-actions' }, 'Amallar')
@@ -167,7 +176,7 @@ export async function renderStudents(container, queryParams = new URLSearchParam
 
     // Auto-open new student modal if query param action=new is passed
     if (queryParams.get('action') === 'new') {
-      showAddStudentModal(() => renderStudents(container));
+      showAddStudentModal(groups, () => renderStudents(container));
     }
 
   } catch (err) {
@@ -185,9 +194,12 @@ export async function renderStudents(container, queryParams = new URLSearchParam
 }
 
 /**
- * Modal dialog for creating a new student.
+ * Modal dialog for creating a new student with group selection.
+ *
+ * @param {Array<Object>} groups
+ * @param {() => void} onSuccess
  */
-function showAddStudentModal(onSuccess) {
+function showAddStudentModal(groups, onSuccess) {
   const nameInput = el('input', {
     type: 'text',
     className: 'form-input',
@@ -203,6 +215,25 @@ function showAddStudentModal(onSuccess) {
     step: '1000',
     required: true
   });
+
+  const groupSelect = el('select', {
+    className: 'form-select',
+    id: 'student-group-select'
+  },
+    el('option', { value: '' }, '-- Guruhsiz --'),
+    ...groups.map((g) => el('option', { value: String(g.id) }, g.name))
+  );
+
+  const groupHelp = groups.length === 0
+    ? el('span', { className: 'form-help' },
+        'Hozircha guruhlar mavjud emas. ',
+        el('a', {
+          href: '#/groups?action=new',
+          onClick: closeModal,
+          style: 'color: var(--accent-primary); font-weight: 500;'
+        }, 'Guruh yaratish →')
+      )
+    : el('span', { className: 'form-help' }, 'O\'quvchi biriktiriladigan guruhni tanlang (ixtiyoriy).');
 
   const errorBox = el('div', { className: 'form-error', style: 'display: none; margin-top: var(--space-3);' });
 
@@ -227,11 +258,13 @@ function showAddStudentModal(onSuccess) {
         return;
       }
 
+      const groupIdVal = groupSelect.value ? parseInt(groupSelect.value, 10) : null;
+
       const submitBtn = form.querySelector('button[type="submit"]');
       if (submitBtn) submitBtn.disabled = true;
 
       try {
-        await createStudent({ full_name: fullName, monthly_fee: feeVal });
+        await createStudent({ full_name: fullName, monthly_fee: feeVal, group_id: groupIdVal });
         closeModal();
         showToast('O\'quvchi muvaffaqiyatli qo\'shildi!', 'success');
         onSuccess();
@@ -251,6 +284,11 @@ function showAddStudentModal(onSuccess) {
       el('label', { className: 'form-label required' }, 'Oylik to\'lov summasi (so\'mda)'),
       feeInput,
       el('span', { className: 'form-help' }, 'Grant/bepul o\'quvchilar uchun 0 deb kiriting.')
+    ),
+    el('div', { className: 'form-group' },
+      el('label', { className: 'form-label' }, 'Guruh'),
+      groupSelect,
+      groupHelp
     ),
     errorBox,
     el('div', { className: 'modal-footer', style: 'padding: var(--space-4) 0 0 0; background: none; border: none;' },
@@ -273,9 +311,13 @@ function showAddStudentModal(onSuccess) {
 }
 
 /**
- * Modal dialog for editing an existing student.
+ * Modal dialog for editing an existing student with group assignment.
+ *
+ * @param {Object} student
+ * @param {Array<Object>} groups
+ * @param {() => void} onSuccess
  */
-function showEditStudentModal(student, onSuccess) {
+function showEditStudentModal(student, groups, onSuccess) {
   const nameInput = el('input', {
     type: 'text',
     className: 'form-input',
@@ -291,6 +333,20 @@ function showEditStudentModal(student, onSuccess) {
     step: '1000',
     required: true
   });
+
+  const groupSelect = el('select', {
+    className: 'form-select',
+    id: 'student-group-edit-select'
+  },
+    el('option', { value: '' }, '-- Guruhsiz --'),
+    ...groups.map((g) => {
+      const optProps = { value: String(g.id) };
+      if (student.group_id && student.group_id === g.id) {
+        optProps.selected = true;
+      }
+      return el('option', optProps, g.name);
+    })
+  );
 
   const errorBox = el('div', { className: 'form-error', style: 'display: none; margin-top: var(--space-3);' });
 
@@ -315,11 +371,13 @@ function showEditStudentModal(student, onSuccess) {
         return;
       }
 
+      const groupIdVal = groupSelect.value ? parseInt(groupSelect.value, 10) : null;
+
       const submitBtn = form.querySelector('button[type="submit"]');
       if (submitBtn) submitBtn.disabled = true;
 
       try {
-        await updateStudent(student.id, { full_name: fullName, monthly_fee: feeVal });
+        await updateStudent(student.id, { full_name: fullName, monthly_fee: feeVal, group_id: groupIdVal });
         closeModal();
         showToast('O\'quvchi ma\'lumotlari yangilandi!', 'success');
         onSuccess();
@@ -338,6 +396,10 @@ function showEditStudentModal(student, onSuccess) {
     el('div', { className: 'form-group' },
       el('label', { className: 'form-label required' }, 'Oylik to\'lov summasi (so\'mda)'),
       feeInput
+    ),
+    el('div', { className: 'form-group' },
+      el('label', { className: 'form-label' }, 'Guruh'),
+      groupSelect
     ),
     errorBox,
     el('div', { className: 'modal-footer', style: 'padding: var(--space-4) 0 0 0; background: none; border: none;' },

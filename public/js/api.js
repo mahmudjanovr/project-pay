@@ -66,14 +66,26 @@ async function request(url, options = {}) {
     const status = response.status;
     let userMessage = '';
 
-    if (data && typeof data === 'object' && data.message) {
+    if (status === 409) {
+      if (data && typeof data === 'object' && data.message) {
+        if (data.message.includes('assigned students')) {
+          userMessage = 'Ushbu guruhda o\'quvchilar mavjud bo\'lganligi sababli uni o\'chirib bo\'lmaydi.';
+        } else if (data.message.includes('already exists')) {
+          userMessage = 'Ushbu nomdagi guruh allaqachon mavjud.';
+        } else if (data.message.includes('payment history')) {
+          userMessage = 'Ushbu o\'quvchida to\'lovlar tarixi mavjud bo\'lganligi sababli uni o\'chirib bo\'lmaydi.';
+        } else {
+          userMessage = data.message;
+        }
+      } else {
+        userMessage = 'Amalni bajarishda ziddiyat yuz berdi.';
+      }
+    } else if (data && typeof data === 'object' && data.message) {
       userMessage = data.message;
     } else if (status === 400) {
       userMessage = 'Kiritilgan ma\'lumotlar yaroqsiz.';
     } else if (status === 404) {
       userMessage = 'So\'ralgan ma\'lumot topilmadi.';
-    } else if (status === 409) {
-      userMessage = 'Ushbu o\'quvchida to\'lovlar tarixi mavjud bo\'lganligi sababli uni o\'chirib bo\'lmaydi.';
     } else if (status === 413) {
       userMessage = 'Yuborilgan ma\'lumot hajmi juda katta.';
     } else if (status >= 500) {
@@ -98,10 +110,14 @@ export async function fetchStudent(id) {
   return request(`/api/students/${id}`);
 }
 
-export async function createStudent({ full_name, monthly_fee }) {
+export async function createStudent({ full_name, monthly_fee, group_id = null }) {
+  const payload = { full_name, monthly_fee };
+  if (group_id !== undefined) {
+    payload.group_id = group_id;
+  }
   return request('/api/students', {
     method: 'POST',
-    body: JSON.stringify({ full_name, monthly_fee })
+    body: JSON.stringify(payload)
   });
 }
 
@@ -114,6 +130,36 @@ export async function updateStudent(id, fields) {
 
 export async function deleteStudent(id) {
   return request(`/api/students/${id}`, {
+    method: 'DELETE'
+  });
+}
+
+// Group API Calls
+
+export async function fetchGroups() {
+  return request('/api/groups');
+}
+
+export async function fetchGroup(id) {
+  return request(`/api/groups/${id}`);
+}
+
+export async function createGroup({ name }) {
+  return request('/api/groups', {
+    method: 'POST',
+    body: JSON.stringify({ name })
+  });
+}
+
+export async function updateGroup(id, { name }) {
+  return request(`/api/groups/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name })
+  });
+}
+
+export async function deleteGroup(id) {
+  return request(`/api/groups/${id}`, {
     method: 'DELETE'
   });
 }
@@ -137,3 +183,4 @@ export async function fetchMonthlyDebtors(month) {
   const query = encodeURIComponent(month);
   return request(`/api/reports/debtors?month=${query}`);
 }
+

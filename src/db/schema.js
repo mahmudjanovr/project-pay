@@ -54,5 +54,27 @@ export const migrations = [
         `);
       }
     }
+  },
+  {
+    version: '003_add_groups_table',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS groups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL COLLATE NOCASE UNIQUE CHECK (length(trim(name)) > 0),
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        ) STRICT;
+      `);
+
+      // Add group_id to students table if not already present
+      const studentColumns = db.prepare('PRAGMA table_info(students)').all();
+      const hasGroupId = studentColumns.some((col) => col.name === 'group_id');
+      if (!hasGroupId) {
+        db.exec('ALTER TABLE students ADD COLUMN group_id INTEGER REFERENCES groups(id) ON DELETE RESTRICT;');
+      }
+
+      db.exec('CREATE INDEX IF NOT EXISTS idx_students_group_id ON students (group_id);');
+    }
   }
 ];
+
