@@ -1,0 +1,144 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import { createDatabase } from '../src/db/connection.js';
+import { initDatabase } from '../src/db/init.js';
+import {
+  createStudent,
+  getStudentById,
+  listStudents,
+  deleteStudent
+} from '../src/services/students.js';
+import {
+  createPayment,
+  getPaymentsByStudent,
+  listPayments
+} from '../src/services/payments.js';
+
+test('Student service operations', async (t) => {
+  const db = createDatabase(':memory:');
+  initDatabase(db);
+
+  await t.test('creates student with trimmed name and UTC timestamp', () => {
+    const student = createStudent(db, { full_name: '  Jasur Bek  ', monthly_fee: 750000 });
+    assert.ok(student.id > 0);
+    assert.equal(student.full_name, 'Jasur Bek');
+    assert.equal(student.monthly_fee, 750000);
+    assert.ok(student.created_at.endsWith('Z'), 'Timestamp must be UTC ISO-8601');
+
+    const fetched = getStudentById(db, student.id);
+    assert.deepEqual(fetched, student);
+  });
+
+  await t.test('returns null for non-existent student ID', () => {
+    const fetched = getStudentById(db, 99999);
+    assert.equal(fetched, null);
+  });
+
+  await t.test('lists students in ascending ID order', () => {
+    createStudent(db, { full_name: 'Anvar', monthly_fee: 500000 });
+    createStudent(db, { full_name: 'Bekzod', monthly_fee: 600000 });
+
+    const students = listStudents(db);
+    assert.ok(students.length >= 3);
+    for (let i = 1; i < students.length; i++) {
+      assert.ok(students[i].id > students[i - 1].id, 'Students must be ordered by id ascending');
+    }
+  });
+
+  await t.test('rejects invalid student inputs', () => {
+    assert.throws(() => createStudent(db, { full_name: '   ', monthly_fee: 500000 }), /empty/);
+    assert.throws(() => createStudent(db, { full_name: 'Valid', monthly_fee: -100 }), /non-negative/);
+    assert.throws(() => createStudent(db, { full_name: 'Valid', monthly_fee: 100.5 }), /safe integer/);
+    assert.throws(() => createStudent(db, { full_name: 'Valid', monthly_fee: '500000' }), /number/);
+  });
+});
+
+test('Payment service operations', async (t) => {
+  const db = createDatabase(':memory:');
+  initDatabase(db);
+
+  const student = createStudent(db, { full_name: 'Malika', monthly_fee: 900000 });
+
+  await t.test('creates payment with validated fields and UTC timestamp', () => {
+    const payment = createPayment(db, {
+      student_id: student.id,
+      amount: 450000,
+      payment_date: '2026-10-10'
+    });
+
+    assert.ok(payment.id > 0);
+    assert.equal(payment.student_id, student.id);
+    assert.equal(payment.amount, 450000);
+    assert.equal(payment.payment_date, '2026-10-10');
+    assert.ok(payment.created_at.endsWith('Z'));
+  });
+
+  await t.test('retrieves payments by student ordered by date and id', () => {
+    createPayment(db, { student_id: student.id, amount: 200000, payment_date: '2026-10-05' });
+    createPayment(db, { student_id: student.id, amount: 250000, payment_date: '2026-10-20' });
+
+    const studentPayments = getPaymentsByStudent(db, student.id);
+    assert.equal(studentPayments.length, 3);
+    assert.equal(studentPayments[0].payment_date, '2026-10-05');
+    assert.equal(studentPayments[1].payment_date, '2026-10-10');
+    assert.equal(studentPayments[2].payment_date, '2026-10-20');
+  });
+
+  await t.test('rejects payment for non-existent student (foreign key)', () => {
+    assert.throws(
+      () => createPayment(db, { student_id: 88888, amount: 100000, payment_date: '2026-10-10' }),
+      /FOREIGN KEY constraint failed/
+    );
+  });
+
+  await t.test('rejects invalid payment inputs at validation layer', () => {
+    assert.throws(() => createPayment(db, { student_id: student.id, amount: 0, payment_date: '2026-10-10' }));
+    assert.throws(() => createPayment(db, { student_id: student.id, amount: -100, payment_date: '2026-10-10' }));
+    assert.throws(() => createPayment(db, { student_id: student.id, amount: 100.5, payment_date: '2026-10-10' }));
+    assert.throws(() => createPayment(db, { student_id: student.id, amount: 1000, payment_date: '2026-02-31' }));
+  });
+});
+
+test('Student deletion and transaction atomicity', async (t) => {
+  const db = createDatabase(':memory:');
+  initDatabase(db);
+
+  await t.test('deleting student with payments fails via ON DELETE RESTRICT', () => {
+    const student = createStudent(db, { full_name: 'Protected Student', monthly_fee: 500000 });
+    createPayment(db, { student_id: student.id, amount: 100000, payment_date: '2026-10-10' });
+
+    assert.throws(
+      () => deleteStudent(db, student.id),
+      /FOREIGN KEY constraint failed/
+    );
+
+    // Verify student is still in db
+    assert.ok(getStudentById(db, student.id));
+  });
+
+  await t.test('deleting student without payments succeeds', () => {
+    const student = createStudent(db, { full_name: 'Temporary Student', monthly_fee: 400000 });
+    const result = deleteStudent(db, student.id);
+    assert.equal(result.success, true);
+    assert.equal(result.changes, 1);
+    assert.equal(getStudentById(db, student.id), null);
+  });
+
+  await t.test('transactions roll back all changes if an error occurs', () => {
+    const runBatch = db.transaction(() => {
+      createStudent(db, { full_name: 'Batch Student 1', monthly_fee: 100000 });
+      createStudent(db, { full_name: 'Batch Student 2', monthly_fee: 200000 });
+      // Deliberately trigger error in 3rd operation
+      throw new Error('Batch operation failed');
+    });
+
+    assert.throws(() => runBatch(), /Batch operation failed/);
+
+    const all = listStudents(db);
+    const hasBatch1 = all.some((s) => s.full_name === 'Batch Student 1');
+    const hasBatch2 = all.some((s) => s.full_name === 'Batch Student 2');
+    assert.equal(hasBatch1, false, 'Batch Student 1 must have been rolled back');
+    assert.equal(hasBatch2, false, 'Batch Student 2 must have been rolled back');
+  });
+});

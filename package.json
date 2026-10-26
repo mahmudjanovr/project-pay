@@ -1,0 +1,16 @@
+{
+  "name": "project-pay",
+  "version": "1.0.0",
+  "description": "Project Pay — Financial operations system for a training center",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [],
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "express": "^5.3.0",
+    "zod": "^4.6.7"
+  }
+}
