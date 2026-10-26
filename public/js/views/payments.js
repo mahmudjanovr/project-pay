@@ -1,10 +1,13 @@
 /**
  * Record Payment View for Project Pay.
- * Form for submitting payments with duplicate protection and validation.
+ * Form for submitting payments with searchable student selection, robust amount parsing,
+ * duplicate protection, and financial validation.
  */
 
 import { fetchStudents, recordPayment } from '../api.js';
 import { formatUzbekSom, getCurrentLocalDateString } from '../formatters.js';
+import { parsePaymentAmount } from '../amountParser.js';
+import { createStudentCombobox } from '../studentCombobox.js';
 import { el, clearElement } from '../dom.js';
 import { showToast } from '../notifications.js';
 
@@ -55,39 +58,40 @@ export async function renderPayments(container, queryParams = new URLSearchParam
       return;
     }
 
-    // Form inputs
-    const studentSelect = el('select', {
-      className: 'form-select',
-      required: true
-    },
-      el('option', { value: '' }, '-- O\'quvchini tanlang --'),
-      ...students.map((s) => {
-        const optionProps = { value: String(s.id) };
-        if (preselectedStudentId && String(s.id) === preselectedStudentId) {
-          optionProps.selected = true;
-        }
-        return el('option', optionProps, `${s.full_name} (Oylik to'lov: ${formatUzbekSom(s.monthly_fee)})`);
-      })
-    );
+    // Accessible Searchable Student Combobox
+    const studentCombobox = createStudentCombobox({
+      students,
+      preselectedStudentId
+    });
 
     const amountPreview = el('span', { className: 'form-help' }, 'Summa: 0 so\'m');
 
+    // Text input with numeric inputmode: supports plain digits, comma, and space separators
     const amountInput = el('input', {
-      type: 'number',
+      type: 'text',
+      inputmode: 'numeric',
+      autocomplete: 'off',
       className: 'form-input',
-      placeholder: 'Masalan: 500000',
-      min: '1',
-      step: '1000',
+      id: 'payment-amount-input',
+      placeholder: 'Masalan: 120000 yoki 120,000',
       required: true,
       onInput: (e) => {
-        const val = Number(e.target.value);
-        if (Number.isSafeInteger(val) && val > 0) {
-          amountPreview.textContent = `Summa: ${formatUzbekSom(val)}`;
-          amountPreview.style.color = 'var(--accent-primary)';
-          amountPreview.style.fontWeight = '500';
-        } else {
-          amountPreview.textContent = 'Iltimos, musbat butun son kiriting';
+        const raw = e.target.value;
+        if (!raw.trim()) {
+          amountPreview.textContent = 'Summa: 0 so\'m';
           amountPreview.style.color = 'var(--text-muted)';
+          amountPreview.style.fontWeight = 'normal';
+          return;
+        }
+
+        const result = parsePaymentAmount(raw);
+        if (result.valid) {
+          amountPreview.textContent = `Summa: ${result.formatted}`;
+          amountPreview.style.color = 'var(--accent-primary)';
+          amountPreview.style.fontWeight = '600';
+        } else {
+          amountPreview.textContent = result.error;
+          amountPreview.style.color = 'var(--status-danger)';
           amountPreview.style.fontWeight = 'normal';
         }
       }
@@ -96,43 +100,48 @@ export async function renderPayments(container, queryParams = new URLSearchParam
     const dateInput = el('input', {
       type: 'date',
       className: 'form-input',
+      id: 'payment-date-input',
       value: getCurrentLocalDateString(),
       required: true
     });
 
     const errorBox = el('div', {
       className: 'form-error',
+      id: 'payment-error-box',
       style: 'display: none; margin-bottom: var(--space-4);'
     });
 
     const submitBtn = el('button', {
       type: 'submit',
+      id: 'payment-submit-btn',
       className: 'btn btn-primary btn-lg'
     }, '✓ To\'lovni saqlash');
 
     const successBanner = el('div', {
       className: 'card',
+      id: 'payment-success-banner',
       style: 'display: none; background-color: var(--status-success-bg); border-color: var(--status-success-border); margin-top: var(--space-6);'
     });
 
-    // Payment Form Element
+    // Payment Form Element with native validation disabled (novalidate) to prevent stepMismatch tooltip blocking
     const form = el('form', {
+      novalidate: true,
       onSubmit: async (e) => {
         e.preventDefault();
         errorBox.style.display = 'none';
         successBanner.style.display = 'none';
 
-        const studentIdVal = parseInt(studentSelect.value, 10);
+        const studentIdVal = studentCombobox.getSelectedStudentId();
         if (!studentIdVal || !Number.isSafeInteger(studentIdVal)) {
           errorBox.textContent = 'Iltimos, o\'quvchini tanlang.';
           errorBox.style.display = 'block';
-          studentSelect.focus();
+          studentCombobox.focus();
           return;
         }
 
-        const amountVal = Number(amountInput.value);
-        if (!Number.isSafeInteger(amountVal) || amountVal <= 0) {
-          errorBox.textContent = 'To\'lov summasi musbat butun son bo\'lishi shart.';
+        const amountResult = parsePaymentAmount(amountInput.value);
+        if (!amountResult.valid) {
+          errorBox.textContent = amountResult.error || 'To\'lov summasi musbat butun son bo\'lishi shart.';
           errorBox.style.display = 'block';
           amountInput.focus();
           return;
@@ -153,7 +162,7 @@ export async function renderPayments(container, queryParams = new URLSearchParam
         try {
           const newPayment = await recordPayment({
             student_id: studentIdVal,
-            amount: amountVal,
+            amount: amountResult.value,
             payment_date: dateVal
           });
 
@@ -182,8 +191,11 @@ export async function renderPayments(container, queryParams = new URLSearchParam
                   onClick: () => {
                     amountInput.value = '';
                     amountPreview.textContent = 'Summa: 0 so\'m';
-                    amountInput.focus();
+                    amountPreview.style.color = 'var(--text-muted)';
+                    amountPreview.style.fontWeight = 'normal';
+                    studentCombobox.clearSelection();
                     successBanner.style.display = 'none';
+                    studentCombobox.focus();
                   }
                 }, '+ Yana boshqa to\'lov kiritish')
               )
@@ -201,17 +213,17 @@ export async function renderPayments(container, queryParams = new URLSearchParam
       }
     },
       el('div', { className: 'form-group' },
-        el('label', { className: 'form-label required' }, 'O\'quvchi'),
-        studentSelect,
-        el('span', { className: 'form-help' }, 'To\'lov kiritilayotgan o\'quvchini ro\'yxatdan tanlang.')
+        el('label', { className: 'form-label required', htmlFor: 'student-combobox-input' }, 'O\'quvchi'),
+        studentCombobox.element,
+        el('span', { className: 'form-help' }, 'O\'quvchi F.I.SH. bo\'yicha qidiring va ro\'yxatdan tanlang.')
       ),
       el('div', { className: 'form-group' },
-        el('label', { className: 'form-label required' }, 'To\'lov summasi (so\'mda)'),
+        el('label', { className: 'form-label required', htmlFor: 'payment-amount-input' }, 'To\'lov summasi (so\'mda)'),
         amountInput,
         amountPreview
       ),
       el('div', { className: 'form-group' },
-        el('label', { className: 'form-label required' }, 'To\'lov sanasi'),
+        el('label', { className: 'form-label required', htmlFor: 'payment-date-input' }, 'To\'lov sanasi'),
         dateInput,
         el('span', { className: 'form-help' }, 'Standart holatda bugungi sana ko\'rsatilgan.')
       ),
