@@ -17,22 +17,47 @@ const UZBEK_MONTH_NAMES = [
   'Dekabr'
 ];
 
+const UZBEK_NUMBER_FORMATTER = new Intl.NumberFormat('uz-UZ', {
+  useGrouping: true
+});
+
 /**
  * Formats a monetary integer amount into Uzbek Som string format (e.g., "1 250 000 so'm").
+ * Supports both safe JavaScript numbers and BigInt accumulators for large multi-row totals.
  *
- * @param {number} amount
+ * @param {number|bigint} amount
  * @returns {string}
  */
 export function formatUzbekSom(amount) {
+  if (typeof amount === 'bigint') {
+    return `${UZBEK_NUMBER_FORMATTER.format(amount)} so'm`;
+  }
   if (typeof amount !== 'number' || !Number.isSafeInteger(amount)) {
     return '0 so\'m';
   }
-  // Group thousands with spaces as per Uzbek accounting convention
-  const formattedNumber = new Intl.NumberFormat('uz-UZ', {
-    useGrouping: true
-  }).format(amount);
+  return `${UZBEK_NUMBER_FORMATTER.format(amount)} so'm`;
+}
 
-  return `${formattedNumber} so'm`;
+/**
+ * Validates that a YYYY-MM-DD string represents an actual calendar date (including leap years).
+ *
+ * @param {string} dateStr
+ * @returns {boolean}
+ */
+export function isValidCalendarDateString(dateStr) {
+  if (typeof dateStr !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return false;
+  }
+  const [yearStr, monthStr, dayStr] = dateStr.split('-');
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  if (month < 1 || month > 12 || day < 1) {
+    return false;
+  }
+  const isLeap = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+  const monthDays = [31, isLeap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= monthDays[month - 1];
 }
 
 /**
@@ -96,5 +121,5 @@ export function getCurrentLocalMonthString() {
   return `${year}-${month}`;
 }
 
-export { parsePaymentAmount } from './amountParser.js';
+export { parsePaymentAmount, parseMonthlyFee } from './amountParser.js';
 

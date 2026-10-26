@@ -5,11 +5,12 @@
  */
 
 import { fetchStudents, recordPayment } from '../api.js';
-import { formatUzbekSom, getCurrentLocalDateString } from '../formatters.js';
+import { formatUzbekSom, getCurrentLocalDateString, isValidCalendarDateString } from '../formatters.js';
 import { parsePaymentAmount } from '../amountParser.js';
 import { createStudentCombobox } from '../studentCombobox.js';
 import { el, clearElement } from '../dom.js';
 import { showToast } from '../notifications.js';
+import { createPageShell, renderStateView } from '../pageLayout.js';
 
 /**
  * Renders the Record Payment form view into the target container.
@@ -18,13 +19,11 @@ import { showToast } from '../notifications.js';
  * @param {URLSearchParams} [queryParams]
  */
 export async function renderPayments(container, queryParams = new URLSearchParams()) {
-  clearElement(container);
-
   const loadingEl = el('div', { className: 'loading-indicator' },
     el('div', { className: 'spinner' }),
     el('p', {}, 'To\'lov formasi yuklanmoqda...')
   );
-  container.appendChild(loadingEl);
+  renderStateView(container, loadingEl);
 
   try {
     const students = await fetchStudents();
@@ -41,9 +40,9 @@ export async function renderPayments(container, queryParams = new URLSearchParam
     );
 
     if (students.length === 0) {
-      container.appendChild(pageHeader);
-      container.appendChild(
-        el('div', { className: 'card' },
+      const emptyShell = createPageShell({
+        header: pageHeader,
+        body: el('div', { className: 'card' },
           el('div', { className: 'empty-state' },
             el('div', { className: 'empty-state-icon' }, '⚠️'),
             el('h3', { className: 'empty-state-title' }, 'O\'quvchilar mavjud emas'),
@@ -54,7 +53,8 @@ export async function renderPayments(container, queryParams = new URLSearchParam
             }, '+ O\'quvchi qo\'shish')
           )
         )
-      );
+      });
+      container.appendChild(emptyShell.element);
       return;
     }
 
@@ -148,8 +148,8 @@ export async function renderPayments(container, queryParams = new URLSearchParam
         }
 
         const dateVal = dateInput.value;
-        if (!dateVal || !/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
-          errorBox.textContent = 'Iltimos, to\'g\'ri sanani tanlang (YYYY-MM-DD).';
+        if (!isValidCalendarDateString(dateVal)) {
+          errorBox.textContent = 'Iltimos, haqiqiy taqvim sanasini kiriting (YYYY-MM-DD).';
           errorBox.style.display = 'block';
           dateInput.focus();
           return;
@@ -195,6 +195,7 @@ export async function renderPayments(container, queryParams = new URLSearchParam
                     amountPreview.style.fontWeight = 'normal';
                     studentCombobox.clearSelection();
                     successBanner.style.display = 'none';
+                    shell.resetScroll();
                     studentCombobox.focus();
                   }
                 }, '+ Yana boshqa to\'lov kiritish')
@@ -202,6 +203,9 @@ export async function renderPayments(container, queryParams = new URLSearchParam
             )
           );
           successBanner.style.display = 'block';
+          if (typeof successBanner.scrollIntoView === 'function') {
+            successBanner.scrollIntoView({ block: 'nearest' });
+          }
 
         } catch (err) {
           errorBox.textContent = err.message || 'To\'lovni saqlashda xatolik yuz berdi.';
@@ -233,7 +237,7 @@ export async function renderPayments(container, queryParams = new URLSearchParam
       )
     );
 
-    const formCard = el('div', { className: 'card' },
+    const formCard = el('div', { className: 'card card-allow-overflow' },
       el('div', { className: 'card-header' },
         el('h2', { className: 'card-title' }, 'To\'lov tafsilotlari')
       ),
@@ -242,13 +246,23 @@ export async function renderPayments(container, queryParams = new URLSearchParam
       )
     );
 
-    container.appendChild(pageHeader);
-    container.appendChild(formCard);
-    container.appendChild(successBanner);
+    const shell = createPageShell({
+      header: pageHeader,
+      body: [formCard, successBanner]
+    });
+    container.appendChild(shell.element);
+
+    if (container.isConnected === false) {
+      studentCombobox.destroy();
+    }
+
+    return () => {
+      studentCombobox.destroy();
+    };
 
   } catch (err) {
-    clearElement(container);
-    container.appendChild(
+    renderStateView(
+      container,
       el('div', { className: 'error-banner' },
         el('span', {}, err.message || 'Ma\'lumotlarni yuklashda xatolik yuz berdi.'),
         el('button', {
@@ -257,5 +271,6 @@ export async function renderPayments(container, queryParams = new URLSearchParam
         }, 'Qayta urinish')
       )
     );
+    return undefined;
   }
 }

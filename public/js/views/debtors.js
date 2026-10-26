@@ -6,6 +6,7 @@
 import { fetchMonthlyDebtors } from '../api.js';
 import { formatUzbekSom, formatMonthName, getCurrentLocalMonthString } from '../formatters.js';
 import { el, clearElement } from '../dom.js';
+import { createPageShell, createSectionToolbar } from '../pageLayout.js';
 
 /**
  * Renders the Monthly Debtor Report view into the target container.
@@ -17,6 +18,7 @@ export async function renderDebtors(container, queryParams = new URLSearchParams
   clearElement(container);
 
   let selectedMonth = queryParams.get('month') || getCurrentLocalMonthString();
+  let activeRequestId = 0;
 
   // Validate format (YYYY-MM)
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(selectedMonth)) {
@@ -40,68 +42,81 @@ export async function renderDebtors(container, queryParams = new URLSearchParams
   // Month selector control
   const monthInput = el('input', {
     type: 'month',
+    id: 'debtor-month-input',
     className: 'form-input',
     value: selectedMonth,
     style: 'max-width: 200px;',
     onChange: (e) => {
       const newMonth = e.target.value;
-      if (newMonth && /^\d{4}-\d{2}$/.test(newMonth)) {
+      if (newMonth && /^\d{4}-(0[1-9]|1[0-2])$/.test(newMonth)) {
         selectedMonth = newMonth;
         loadReport();
       }
     }
   });
 
-  const filterCard = el('div', { className: 'card', style: 'margin-bottom: var(--space-6);' },
-    el('div', { className: 'card-body', style: 'padding: var(--space-4) var(--space-6); display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap;' },
-      el('div', { style: 'display: flex; align-items: center; gap: var(--space-3);' },
-        el('label', { className: 'form-label', style: 'margin-bottom: 0;' }, 'Hisobot oyi:'),
-        monthInput
-      ),
-      el('span', { id: 'report-month-label', style: 'font-weight: 600; color: var(--text-primary);' },
-        formatMonthName(selectedMonth)
-      )
-    )
+  const monthLabel = el('span', {
+    id: 'report-month-label',
+    style: 'font-weight: 600; color: var(--text-primary);'
+  }, formatMonthName(selectedMonth));
+
+  const filterToolbar = createSectionToolbar(
+    [
+      el('label', { className: 'form-label', for: 'debtor-month-input', style: 'margin-bottom: 0;' }, 'Hisobot oyi:'),
+      monthInput
+    ],
+    monthLabel
   );
 
   const reportContent = el('div', { id: 'report-content' });
 
-  container.appendChild(pageHeader);
-  container.appendChild(filterCard);
-  container.appendChild(reportContent);
+  const shell = createPageShell({
+    header: pageHeader,
+    toolbar: filterToolbar,
+    body: reportContent
+  });
+  container.appendChild(shell.element);
 
   async function loadReport() {
-    clearElement(reportContent);
+    const requestId = ++activeRequestId;
+    const targetMonth = selectedMonth;
 
-    const monthLabel = document.getElementById('report-month-label');
-    if (monthLabel) {
-      monthLabel.textContent = formatMonthName(selectedMonth);
-    }
+    shell.resetScroll();
+    clearElement(reportContent);
+    monthLabel.textContent = formatMonthName(targetMonth);
 
     const loadingEl = el('div', { className: 'loading-indicator' },
       el('div', { className: 'spinner' }),
-      el('p', {}, `${formatMonthName(selectedMonth)} hisoboti yuklanmoqda...`)
+      el('p', {}, `${formatMonthName(targetMonth)} hisoboti yuklanmoqda...`)
     );
     reportContent.appendChild(loadingEl);
 
     try {
-      const debtors = await fetchMonthlyDebtors(selectedMonth);
+      const debtors = await fetchMonthlyDebtors(targetMonth);
+      // Ignore stale responses if the user switched months while this request was in flight
+      if (requestId !== activeRequestId) {
+        return;
+      }
+
       clearElement(reportContent);
 
-      // Calculate total debt accurately using safe integer checks
-      let totalDebt = 0;
-      let totalPaidInMonth = 0;
-      let isSafeCalculation = true;
+      // Calculate total debt accurately using BigInt to prevent safe-integer overflow
+      let totalDebt = 0n;
+      let totalPaidInMonth = 0n;
+      let isSafeDebt = true;
+      let isSafePaid = true;
 
       for (const d of debtors) {
-        if (Number.isSafeInteger(d.debt) && Number.isSafeInteger(totalDebt)) {
-          totalDebt += d.debt;
+        if (Number.isSafeInteger(d.debt) && d.debt >= 0) {
+          totalDebt += BigInt(d.debt);
         } else {
-          isSafeCalculation = false;
+          isSafeDebt = false;
         }
 
-        if (Number.isSafeInteger(d.total_paid) && Number.isSafeInteger(totalPaidInMonth)) {
-          totalPaidInMonth += d.total_paid;
+        if (Number.isSafeInteger(d.total_paid) && d.total_paid >= 0) {
+          totalPaidInMonth += BigInt(d.total_paid);
+        } else {
+          isSafePaid = false;
         }
       }
 
@@ -110,16 +125,16 @@ export async function renderDebtors(container, queryParams = new URLSearchParams
         el('div', { className: 'stat-card accent-amber' },
           el('span', { className: 'stat-label' }, 'Qarzdorlar soni'),
           el('div', { className: 'stat-value' }, `${debtors.length} nafar`),
-          el('span', { className: 'stat-desc' }, `${formatMonthName(selectedMonth)} bo'yicha`)
+          el('span', { className: 'stat-desc' }, `${formatMonthName(targetMonth)} bo'yicha`)
         ),
         el('div', { className: 'stat-card accent-red' },
           el('span', { className: 'stat-label' }, 'Jami qarz summasi'),
-          el('div', { className: 'stat-value' }, isSafeCalculation ? formatUzbekSom(totalDebt) : '—'),
+          el('div', { className: 'stat-value' }, isSafeDebt ? formatUzbekSom(totalDebt) : '—'),
           el('span', { className: 'stat-desc' }, 'Qoldiq to\'lanmagan summa')
         ),
         el('div', { className: 'stat-card accent-green' },
           el('span', { className: 'stat-label' }, 'Qarzdorlar to\'lagan summa'),
-          el('div', { className: 'stat-value' }, formatUzbekSom(totalPaidInMonth)),
+          el('div', { className: 'stat-value' }, isSafePaid ? formatUzbekSom(totalPaidInMonth) : '—'),
           el('span', { className: 'stat-desc' }, 'Shu oyda qisman qilingan to\'lovlar')
         )
       );
@@ -132,15 +147,24 @@ export async function renderDebtors(container, queryParams = new URLSearchParams
         el('span', {}, 'Qarzdorlik har bir oy uchun qat\'iy alohida hisoblanadi. Boshqa oylardagi to\'lovlar yoki ortiqcha to\'lovlar tanlangan oy qarziga ta\'sir qilmaydi.')
       );
 
-      const tableCard = el('div', { className: 'card' },
+      let tableCard = null;
+      const debtorsTableEl = renderDebtorsTable(debtors, targetMonth, () => {
+        const nextTop = tableCard && Number.isFinite(tableCard.offsetTop)
+          ? Math.max(0, tableCard.offsetTop - 8)
+          : 0;
+        shell.bodyEl.scrollTop = nextTop;
+        shell.setScrolled(nextTop > 2);
+      });
+
+      tableCard = el('div', { className: debtors.length > 0 ? 'card card-table' : 'card' },
         el('div', { className: 'card-header' },
-          el('h2', { className: 'card-title' }, `Qarzdor o'quvchilar ro'yxati (${formatMonthName(selectedMonth)})`),
+          el('h2', { className: 'card-title' }, `Qarzdor o'quvchilar ro'yxati (${formatMonthName(targetMonth)})`),
           el('span', { style: 'font-size: 0.8125rem; color: var(--text-muted);' },
             `Jami: ${debtors.length} nafar qarzdor`
           )
         ),
         el('div', { className: 'card-body', style: 'padding: 0;' },
-          renderDebtorsTable(debtors, selectedMonth)
+          debtorsTableEl
         )
       );
 
@@ -149,11 +173,15 @@ export async function renderDebtors(container, queryParams = new URLSearchParams
       reportContent.appendChild(tableCard);
 
     } catch (err) {
+      if (requestId !== activeRequestId) {
+        return;
+      }
       clearElement(reportContent);
       reportContent.appendChild(
         el('div', { className: 'error-banner' },
           el('span', {}, err.message || 'Qarzdorlar hisobotini yuklashda xatolik yuz berdi.'),
           el('button', {
+            type: 'button',
             className: 'btn btn-secondary btn-sm',
             onClick: loadReport
           }, 'Qayta urinish')
@@ -162,10 +190,10 @@ export async function renderDebtors(container, queryParams = new URLSearchParams
     }
   }
 
-  loadReport();
+  await loadReport();
 }
 
-function renderDebtorsTable(debtors, monthStr) {
+function renderDebtorsTable(debtors, monthStr, onPageChange = null) {
   if (debtors.length === 0) {
     return el('div', { className: 'empty-state' },
       el('div', { className: 'empty-state-icon' }, '✓'),
@@ -176,40 +204,86 @@ function renderDebtorsTable(debtors, monthStr) {
     );
   }
 
-  const tbody = el('tbody', {},
-    ...debtors.map((d) =>
-      el('tr', {},
-        el('td', { style: 'font-weight: 500;' },
-          el('a', {
-            href: `#/students/${d.student_id}`,
-            style: 'color: var(--text-primary); text-decoration: none;'
-          }, d.full_name)
-        ),
-        el('td', { className: 'col-numeric' }, formatUzbekSom(d.monthly_fee)),
-        el('td', { className: 'col-numeric', style: 'color: var(--accent-primary);' }, formatUzbekSom(d.total_paid)),
-        el('td', { className: 'col-numeric', style: 'color: var(--status-danger); font-weight: 700;' }, formatUzbekSom(d.debt)),
-        el('td', { className: 'col-actions' },
-          el('a', {
-            href: `#/payments?student_id=${d.student_id}`,
-            className: 'btn btn-primary btn-sm'
-          }, 'To\'lash')
+  const PAGE_SIZE = 100;
+  let currentPage = 1;
+  const totalPages = Math.max(1, Math.ceil(debtors.length / PAGE_SIZE));
+  const wrapper = el('div', { className: 'table-container' });
+
+  function renderPage() {
+    clearElement(wrapper);
+    const startIdx = (currentPage - 1) * PAGE_SIZE;
+    const pageItems = debtors.slice(startIdx, startIdx + PAGE_SIZE);
+
+    const tbody = el('tbody', {},
+      ...pageItems.map((d) =>
+        el('tr', {},
+          el('td', { style: 'font-weight: 500;' },
+            el('a', {
+              href: `#/students/${d.student_id}`,
+              style: 'color: var(--text-primary); text-decoration: none;'
+            }, d.full_name)
+          ),
+          el('td', { className: 'col-numeric' }, formatUzbekSom(d.monthly_fee)),
+          el('td', { className: 'col-numeric', style: 'color: var(--accent-primary);' }, formatUzbekSom(d.total_paid)),
+          el('td', { className: 'col-numeric', style: 'color: var(--status-danger); font-weight: 700;' }, formatUzbekSom(d.debt)),
+          el('td', { className: 'col-actions' },
+            el('a', {
+              href: `#/payments?student_id=${d.student_id}`,
+              className: 'btn btn-primary btn-sm'
+            }, 'To\'lash')
+          )
         )
       )
-    )
-  );
+    );
 
-  return el('div', { className: 'table-container' },
-    el('table', { className: 'data-table' },
-      el('thead', {},
-        el('tr', {},
-          el('th', {}, 'O\'quvchi F.I.SH.'),
-          el('th', { className: 'col-numeric' }, 'Oylik stavka'),
-          el('th', { className: 'col-numeric' }, 'To\'langan summa'),
-          el('th', { className: 'col-numeric' }, 'Qoldiq qarz'),
-          el('th', { className: 'col-actions' }, 'Harakat')
+    wrapper.appendChild(
+      el('table', { className: 'data-table' },
+        el('thead', {},
+          el('tr', {},
+            el('th', {}, 'O\'quvchi F.I.SH.'),
+            el('th', { className: 'col-numeric' }, 'Oylik stavka'),
+            el('th', { className: 'col-numeric' }, 'To\'langan summa'),
+            el('th', { className: 'col-numeric' }, 'Qoldiq qarz'),
+            el('th', { className: 'col-actions' }, 'Harakat')
+          )
+        ),
+        tbody
+      )
+    );
+
+    if (totalPages > 1) {
+      wrapper.appendChild(
+        el('div', { className: 'pagination-bar' },
+          el('button', {
+            type: 'button',
+            className: 'btn btn-secondary btn-sm',
+            disabled: currentPage <= 1,
+            onClick: () => {
+              if (currentPage > 1) {
+                currentPage -= 1;
+                renderPage();
+                if (typeof onPageChange === 'function') onPageChange();
+              }
+            }
+          }, '← Oldingi'),
+          el('span', { className: 'pagination-info' }, `Sahifa ${currentPage} / ${totalPages}`),
+          el('button', {
+            type: 'button',
+            className: 'btn btn-secondary btn-sm',
+            disabled: currentPage >= totalPages,
+            onClick: () => {
+              if (currentPage < totalPages) {
+                currentPage += 1;
+                renderPage();
+                if (typeof onPageChange === 'function') onPageChange();
+              }
+            }
+          }, 'Keyingi →')
         )
-      ),
-      tbody
-    )
-  );
+      );
+    }
+  }
+
+  renderPage();
+  return wrapper;
 }

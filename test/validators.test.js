@@ -203,14 +203,33 @@ test('Report month validation', async (t) => {
   });
 });
 
-test('Compound schemas: createStudentSchema and createPaymentSchema', async (t) => {
+test('Compound schemas: createStudentSchema, updateStudentSchema, and createPaymentSchema', async (t) => {
   await t.test('validateStudentInput accepts valid input and rejects extra or invalid fields', () => {
     const student = validateStudentInput({ full_name: '  Dilshod  ', monthly_fee: 1000000 });
     assert.equal(student.full_name, 'Dilshod');
     assert.equal(student.monthly_fee, 1000000);
+    assert.equal(student.phone, undefined);
+
+    const withPhone = validateStudentInput({
+      full_name: 'Dilshod',
+      phone: '  +998 90 123 45 67  ',
+      monthly_fee: 1000000
+    });
+    assert.equal(withPhone.phone, '+998 90 123 45 67');
+
+    // Blank and null phone normalize to null
+    assert.equal(validateStudentInput({ full_name: 'Dilshod', phone: '', monthly_fee: 1000000 }).phone, null);
+    assert.equal(validateStudentInput({ full_name: 'Dilshod', phone: '   ', monthly_fee: 1000000 }).phone, null);
+    assert.equal(validateStudentInput({ full_name: 'Dilshod', phone: null, monthly_fee: 1000000 }).phone, null);
+
+    // Non-string phone rejected without coercion
+    assert.throws(() => validateStudentInput({ full_name: 'Dilshod', phone: 998901234567, monthly_fee: 1000000 }));
+    assert.throws(() => validateStudentInput({ full_name: 'Dilshod', phone: true, monthly_fee: 1000000 }));
+    assert.throws(() => validateStudentInput({ full_name: 'Dilshod', phone: '9'.repeat(51), monthly_fee: 1000000 }));
 
     // Extra unknown fields rejected by strict schema
     assert.throws(() => validateStudentInput({ full_name: 'Dilshod', monthly_fee: 1000000, extra: true }));
+    assert.throws(() => validateStudentInput({ full_name: 'Dilshod', monthly_fee: 1000000, phone_number: '+99890' }));
   });
 
   await t.test('validatePaymentInput accepts valid input and rejects extra or invalid fields', () => {

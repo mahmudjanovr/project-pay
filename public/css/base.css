@@ -6,6 +6,7 @@
 }
 
 html {
+  height: 100%;
   font-size: 16px;
   -webkit-text-size-adjust: 100%;
   text-rendering: optimizeLegibility;
@@ -16,7 +17,10 @@ body {
   background-color: var(--bg-app);
   color: var(--text-primary);
   line-height: 1.5;
+  height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }

@@ -7,7 +7,11 @@ import { el } from './dom.js';
 let container = null;
 
 function getContainer() {
-  if (!container) {
+  if (
+    !container ||
+    container.isConnected === false ||
+    (container.ownerDocument && container.ownerDocument !== document)
+  ) {
     container = document.getElementById('toast-container');
     if (!container) {
       container = el('div', { id: 'toast-container', className: 'toast-container', 'aria-live': 'polite' });

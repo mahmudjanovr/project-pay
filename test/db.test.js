@@ -56,10 +56,11 @@ test('Database initialization and repeat initialization', async (t) => {
       assert.equal(payments.count, 0, 'No demo payment records should exist');
 
       const migrations = db.prepare('SELECT * FROM schema_migrations ORDER BY id ASC').all();
-      assert.equal(migrations.length, 3);
+      assert.equal(migrations.length, 4);
       assert.equal(migrations[0].version, '001_initial_schema');
       assert.equal(migrations[1].version, '002_harden_constraints');
       assert.equal(migrations[2].version, '003_add_groups_table');
+      assert.equal(migrations[3].version, '004_add_student_phone');
     } finally {
       db.close();
     }
@@ -439,6 +440,83 @@ test('Migration safety and transaction rollback', async (t) => {
       );
     } finally {
       db.close();
+    }
+  });
+
+  await t.test('smoothly migrates an existing pre-004 file database to add phone column without losing data', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'project-pay-phone-mig-'));
+    const dbPath = path.join(tmpDir, 'legacy_pre_phone.db');
+
+    try {
+      const legacyDb = createDatabase(dbPath);
+      legacyDb.exec(`
+        CREATE TABLE schema_migrations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          version TEXT NOT NULL UNIQUE,
+          applied_at TEXT NOT NULL
+        ) STRICT;
+
+        INSERT INTO schema_migrations (version, applied_at) VALUES
+          ('001_initial_schema', '2026-10-01T00:00:00.000Z'),
+          ('002_harden_constraints', '2026-10-01T00:00:00.000Z'),
+          ('003_add_groups_table', '2026-10-01T00:00:00.000Z');
+
+        CREATE TABLE groups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL COLLATE NOCASE UNIQUE CHECK (length(trim(name)) > 0),
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        ) STRICT;
+
+        CREATE TABLE students (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          full_name TEXT NOT NULL CHECK (length(trim(full_name)) > 0),
+          monthly_fee INTEGER NOT NULL CHECK (monthly_fee >= 0 AND monthly_fee <= 9007199254740991),
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+          group_id INTEGER REFERENCES groups(id) ON DELETE RESTRICT
+        ) STRICT;
+
+        CREATE TABLE payments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
+          amount INTEGER NOT NULL CHECK (amount > 0 AND amount <= 9007199254740991),
+          payment_date TEXT NOT NULL CHECK (payment_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' AND date(payment_date) = payment_date),
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        ) STRICT;
+      `);
+
+      legacyDb.prepare("INSERT INTO groups (id, name, created_at) VALUES (1, 'English', '2026-10-01T00:00:00.000Z')").run();
+      legacyDb.prepare("INSERT INTO students (id, full_name, monthly_fee, created_at, group_id) VALUES (1, 'Alisher Navoiy', 500000, '2026-10-01T00:00:00.000Z', 1)").run();
+      legacyDb.prepare("INSERT INTO payments (id, student_id, amount, payment_date, created_at) VALUES (1, 1, 200000, '2026-10-10', '2026-10-10T00:00:00.000Z')").run();
+      legacyDb.close();
+
+      // Reopen and run initDatabase to apply 004_add_student_phone
+      const upgradedDb = createDatabase(dbPath);
+      initDatabase(upgradedDb);
+
+      const existingStudent = upgradedDb.prepare('SELECT * FROM students WHERE id = 1').get();
+      assert.equal(existingStudent.full_name, 'Alisher Navoiy');
+      assert.equal(existingStudent.monthly_fee, 500000);
+      assert.equal(existingStudent.group_id, 1);
+      assert.equal(existingStudent.phone, null);
+
+      const existingPayment = upgradedDb.prepare('SELECT * FROM payments WHERE id = 1').get();
+      assert.equal(existingPayment.amount, 200000);
+
+      // Update phone on migrated student and enforce STRICT TEXT check
+      upgradedDb.prepare("UPDATE students SET phone = '+998 90 123 45 67' WHERE id = 1").run();
+      const withPhone = upgradedDb.prepare('SELECT phone FROM students WHERE id = 1').get();
+      assert.equal(withPhone.phone, '+998 90 123 45 67');
+
+      assert.throws(
+        () => upgradedDb.prepare('UPDATE students SET phone = ? WHERE id = 1').run(Buffer.from([0x01, 0x02])),
+        /cannot store BLOB value in TEXT column/
+      );
+
+      // Re-running initDatabase is idempotent
+      initDatabase(upgradedDb);
+      upgradedDb.close();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 });

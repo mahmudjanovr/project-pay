@@ -5,6 +5,57 @@
 import { validateGroupInput, validateUpdateGroupInput, idSchema } from '../validators/index.js';
 import { getCurrentUtcIsoString } from '../utils/date.js';
 
+const groupStmtCache = new WeakMap();
+
+function getGroupStmts(db) {
+  let stmts = groupStmtCache.get(db);
+  if (!stmts) {
+    stmts = {
+      list: db.prepare(`
+        SELECT
+          g.id,
+          g.name,
+          g.created_at,
+          COUNT(s.id) AS student_count
+        FROM groups g
+        LEFT JOIN students s ON s.group_id = g.id
+        GROUP BY g.id, g.name, g.created_at
+        ORDER BY g.name COLLATE NOCASE ASC;
+      `),
+      getById: db.prepare(`
+        SELECT
+          g.id,
+          g.name,
+          g.created_at,
+          COUNT(s.id) AS student_count
+        FROM groups g
+        LEFT JOIN students s ON s.group_id = g.id
+        WHERE g.id = ?
+        GROUP BY g.id, g.name, g.created_at;
+      `),
+      insert: db.prepare('INSERT INTO groups (name, created_at) VALUES (?, ?)'),
+      update: db.prepare('UPDATE groups SET name = ? WHERE id = ?'),
+      deleteById: db.prepare('DELETE FROM groups WHERE id = ?'),
+      studentsByGroup: db.prepare(`
+        SELECT
+          s.id,
+          s.full_name,
+          s.phone,
+          s.monthly_fee,
+          s.created_at,
+          s.group_id,
+          g.name AS group_name
+        FROM students s
+        JOIN groups g ON g.id = s.group_id
+        WHERE s.group_id = ?
+        ORDER BY s.id ASC;
+      `)
+    };
+    groupStmtCache.set(db, stmts);
+  }
+  return stmts;
+}
+
 /**
  * Retrieves all groups with assigned student counts, ordered by name.
  *
@@ -12,19 +63,8 @@ import { getCurrentUtcIsoString } from '../utils/date.js';
  * @returns {Array<{ id: number, name: string, created_at: string, student_count: number }>}
  */
 export function listGroups(db) {
-  const stmt = db.prepare(`
-    SELECT
-      g.id,
-      g.name,
-      g.created_at,
-      COUNT(s.id) AS student_count
-    FROM groups g
-    LEFT JOIN students s ON s.group_id = g.id
-    GROUP BY g.id, g.name, g.created_at
-    ORDER BY g.name COLLATE NOCASE ASC;
-  `);
-
-  return stmt.all().map((row) => ({
+  const { list } = getGroupStmts(db);
+  return list.all().map((row) => ({
     id: row.id,
     name: row.name,
     created_at: row.created_at,
@@ -41,19 +81,8 @@ export function listGroups(db) {
  */
 export function getGroupById(db, id) {
   const validId = idSchema.parse(id);
-  const stmt = db.prepare(`
-    SELECT
-      g.id,
-      g.name,
-      g.created_at,
-      COUNT(s.id) AS student_count
-    FROM groups g
-    LEFT JOIN students s ON s.group_id = g.id
-    WHERE g.id = ?
-    GROUP BY g.id, g.name, g.created_at;
-  `);
-
-  const row = stmt.get(validId);
+  const { getById } = getGroupStmts(db);
+  const row = getById.get(validId);
   if (!row) {
     return null;
   }
@@ -77,10 +106,8 @@ export function createGroup(db, data) {
   const validated = validateGroupInput(data);
   const createdAt = getCurrentUtcIsoString();
 
-  const stmt = db.prepare(
-    'INSERT INTO groups (name, created_at) VALUES (?, ?)'
-  );
-  const info = stmt.run(validated.name, createdAt);
+  const { insert } = getGroupStmts(db);
+  const info = insert.run(validated.name, createdAt);
 
   return {
     id: Number(info.lastInsertRowid),
@@ -101,23 +128,25 @@ export function createGroup(db, data) {
 export function updateGroup(db, id, data) {
   const validId = idSchema.parse(id);
   const validated = validateUpdateGroupInput(data);
+  const { update } = getGroupStmts(db);
 
-  const existing = getGroupById(db, validId);
-  if (!existing) {
-    return null;
-  }
+  const runUpdate = db.transaction(() => {
+    const existing = getGroupById(db, validId);
+    if (!existing) {
+      return null;
+    }
 
-  const stmt = db.prepare(
-    'UPDATE groups SET name = ? WHERE id = ?'
-  );
-  stmt.run(validated.name, validId);
+    update.run(validated.name, validId);
 
-  return {
-    id: existing.id,
-    name: validated.name,
-    created_at: existing.created_at,
-    student_count: existing.student_count
-  };
+    return {
+      id: existing.id,
+      name: validated.name,
+      created_at: existing.created_at,
+      student_count: existing.student_count
+    };
+  });
+
+  return runUpdate();
 }
 
 /**
@@ -129,33 +158,50 @@ export function updateGroup(db, id, data) {
  */
 export function deleteGroup(db, id) {
   const validId = idSchema.parse(id);
+  const { deleteById } = getGroupStmts(db);
 
-  const existing = getGroupById(db, validId);
-  if (!existing) {
+  const runDelete = db.transaction(() => {
+    const existing = getGroupById(db, validId);
+    if (!existing) {
+      return {
+        found: false,
+        deleted: false,
+        hasStudents: false,
+        student_count: 0
+      };
+    }
+
+    if (existing.student_count > 0) {
+      return {
+        found: true,
+        deleted: false,
+        hasStudents: true,
+        student_count: existing.student_count
+      };
+    }
+
+    const info = deleteById.run(validId);
+
     return {
-      found: false,
-      deleted: false,
+      found: true,
+      deleted: info.changes > 0,
       hasStudents: false,
       student_count: 0
     };
-  }
+  });
 
-  if (existing.student_count > 0) {
-    return {
-      found: true,
-      deleted: false,
-      hasStudents: true,
-      student_count: existing.student_count
-    };
-  }
+  return runDelete();
+}
 
-  const stmt = db.prepare('DELETE FROM groups WHERE id = ?');
-  const info = stmt.run(validId);
-
-  return {
-    found: true,
-    deleted: info.changes > 0,
-    hasStudents: false,
-    student_count: 0
-  };
+/**
+ * Retrieves all students assigned to a specific group.
+ *
+ * @param {import('better-sqlite3').Database} db
+ * @param {number} groupId
+ * @returns {Array<{ id: number, full_name: string, phone: string|null, monthly_fee: number, created_at: string, group_id: number, group_name: string }>}
+ */
+export function getStudentsByGroupId(db, groupId) {
+  const validId = idSchema.parse(groupId);
+  const { studentsByGroup } = getGroupStmts(db);
+  return studentsByGroup.all(validId);
 }

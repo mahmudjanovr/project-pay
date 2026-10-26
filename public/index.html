@@ -6,11 +6,12 @@
   <title>Project Pay — Moliya va To'lovlar Tizimi</title>
   <meta name="description" content="O'quv markazi ichki moliyaviy operatsiyalari va qarzdorlik hisobotlari boshqaruvi">
   
-  <!-- Stylesheets -->
-  <link rel="stylesheet" href="css/variables.css">
-  <link rel="stylesheet" href="css/base.css">
-  <link rel="stylesheet" href="css/layout.css">
-  <link rel="stylesheet" href="css/components.css">
+  <!-- Icon & Stylesheets -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='sans-serif' font-weight='700' font-size='18' fill='white'%3EP%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/css/variables.css">
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/layout.css">
+  <link rel="stylesheet" href="/css/components.css">
 </head>
 <body>
   <!-- Accessible Skip Link -->
@@ -81,12 +82,12 @@
   </div>
 
   <!-- Reusable Modal Container -->
-  <div id="modal-overlay" class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1"></div>
+  <div id="modal-overlay" class="modal-overlay" role="dialog" aria-modal="true" aria-hidden="true" tabindex="-1"></div>
 
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
   <!-- Application Entry Point -->
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="/js/app.js"></script>
 </body>
 </html>

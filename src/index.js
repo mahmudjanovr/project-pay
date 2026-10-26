@@ -9,6 +9,7 @@ export { migrations } from './db/schema.js';
 
 export {
   studentNameSchema,
+  studentPhoneSchema,
   monthlyFeeSchema,
   paymentAmountSchema,
   paymentDateSchema,
@@ -30,6 +31,7 @@ export {
   validateUpdateStudentInput,
   validatePaymentInput,
   validateStudentName,
+  validateStudentPhone,
   validateMonthlyFee,
   validatePaymentAmount,
   validatePaymentDate,
@@ -58,7 +60,8 @@ export {
   getGroupById,
   listGroups,
   updateGroup,
-  deleteGroup
+  deleteGroup,
+  getStudentsByGroupId
 } from './services/groups.js';
 
 export {
@@ -77,5 +80,5 @@ export { startServer, PORT, DB_PATH } from './server.js';
 export { createStudentRouter } from './routes/students.js';
 export { createGroupRouter } from './routes/groups.js';
 export { createPaymentRouter } from './routes/payments.js';
-export { createReportRouter } from './routes/reports.js';
+export { createReportRouter, createDebtorsHandler } from './routes/reports.js';
 

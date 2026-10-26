@@ -8,7 +8,8 @@ import {
   getGroupById,
   createGroup,
   updateGroup,
-  deleteGroup
+  deleteGroup,
+  getStudentsByGroupId
 } from '../services/groups.js';
 import { parseRouteId } from '../validators/index.js';
 
@@ -43,6 +44,42 @@ export function createGroupRouter(db) {
           message: 'Group with this name already exists'
         });
       }
+      next(err);
+    }
+  });
+
+  // GET /api/groups/:id - Get a single group
+  router.get('/:id', (req, res, next) => {
+    try {
+      const groupId = parseRouteId(req.params.id);
+      const group = getGroupById(db, groupId);
+      if (!group) {
+        return res.status(404).json({
+          error: 'Not Found',
+          message: `Group with ID ${groupId} not found`
+        });
+      }
+      res.status(200).json(group);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /api/groups/:id/students - List students belonging to a group
+  router.get('/:id/students', (req, res, next) => {
+    try {
+      const groupId = parseRouteId(req.params.id);
+      const group = getGroupById(db, groupId);
+      if (!group) {
+        return res.status(404).json({
+          error: 'Not Found',
+          message: `Group with ID ${groupId} not found`
+        });
+      }
+
+      const students = getStudentsByGroupId(db, groupId);
+      res.status(200).json(students);
+    } catch (err) {
       next(err);
     }
   });

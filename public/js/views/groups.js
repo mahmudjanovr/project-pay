@@ -8,6 +8,7 @@ import { formatDate } from '../formatters.js';
 import { el, clearElement } from '../dom.js';
 import { openModal, closeModal } from '../modal.js';
 import { showToast } from '../notifications.js';
+import { createPageShell, renderStateView } from '../pageLayout.js';
 
 /**
  * Renders the Groups management interface into the target container.
@@ -16,13 +17,11 @@ import { showToast } from '../notifications.js';
  * @param {URLSearchParams} [queryParams]
  */
 export async function renderGroups(container, queryParams = new URLSearchParams()) {
-  clearElement(container);
-
   const loadingEl = el('div', { className: 'loading-indicator' },
     el('div', { className: 'spinner' }),
     el('p', {}, 'Guruhlar ro\'yxati yuklanmoqda...')
   );
-  container.appendChild(loadingEl);
+  renderStateView(container, loadingEl);
 
   try {
     const groups = await fetchGroups();
@@ -60,7 +59,7 @@ export async function renderGroups(container, queryParams = new URLSearchParams(
       )
     );
 
-    const contentCard = el('div', { className: 'card' });
+    const contentCard = el('div', { className: groups.length > 0 ? 'card card-table' : 'card' });
 
     if (groups.length === 0) {
       contentCard.appendChild(
@@ -78,8 +77,20 @@ export async function renderGroups(container, queryParams = new URLSearchParams(
     } else {
       const tbody = el('tbody', {},
         ...groups.map((group) =>
-          el('tr', {},
-            el('td', { style: 'font-weight: 600;' }, group.name),
+          el('tr', {
+            style: 'cursor: pointer;',
+            onClick: (e) => {
+              if (e.target.closest('button') || e.target.closest('a')) return;
+              window.location.hash = `#/groups/${group.id}`;
+            }
+          },
+            el('td', { style: 'font-weight: 600;' },
+              el('a', {
+                href: `#/groups/${group.id}`,
+                style: 'color: var(--text-primary); text-decoration: none;',
+                title: `${group.name} tafsilotlarini ko'rish`
+              }, group.name)
+            ),
             el('td', { className: 'col-numeric' },
               el('span', {
                 className: group.student_count > 0 ? 'badge-group' : '',
@@ -89,6 +100,11 @@ export async function renderGroups(container, queryParams = new URLSearchParams(
             el('td', { style: 'color: var(--text-muted); font-size: 0.8125rem;' }, formatDate(group.created_at)),
             el('td', { className: 'col-actions' },
               el('div', { style: 'display: flex; gap: var(--space-2); justify-content: flex-end;' },
+                el('a', {
+                  href: `#/groups/${group.id}`,
+                  className: 'btn btn-secondary btn-sm',
+                  title: 'Guruh o\'quvchilarini ko\'rish'
+                }, 'O\'quvchilar'),
                 el('button', {
                   type: 'button',
                   className: 'btn btn-secondary btn-sm',
@@ -124,9 +140,11 @@ export async function renderGroups(container, queryParams = new URLSearchParams(
       contentCard.appendChild(table);
     }
 
-    container.appendChild(pageHeader);
-    container.appendChild(statsGrid);
-    container.appendChild(contentCard);
+    const shell = createPageShell({
+      header: pageHeader,
+      body: [statsGrid, contentCard]
+    });
+    container.appendChild(shell.element);
 
     // Auto-open modal if query parameter action=new is present
     if (queryParams.get('action') === 'new') {
@@ -134,8 +152,8 @@ export async function renderGroups(container, queryParams = new URLSearchParams(
     }
 
   } catch (err) {
-    clearElement(container);
-    container.appendChild(
+    renderStateView(
+      container,
       el('div', { className: 'error-banner' },
         el('span', {}, err.message || 'Guruhlar ma\'lumotini yuklashda xatolik yuz berdi.'),
         el('button', {
@@ -153,10 +171,13 @@ export async function renderGroups(container, queryParams = new URLSearchParams(
  * @param {() => void} onSuccess
  */
 export function showAddGroupModal(onSuccess) {
+  const nameInputId = 'add-group-name';
   const nameInput = el('input', {
     type: 'text',
+    id: nameInputId,
     className: 'form-input',
     placeholder: 'Masalan: Frontend Dasturlash',
+    maxlength: '150',
     required: true,
     autocomplete: 'off'
   });
@@ -167,6 +188,7 @@ export function showAddGroupModal(onSuccess) {
   });
 
   const form = el('form', {
+    novalidate: true,
     onSubmit: async (e) => {
       e.preventDefault();
       errorBox.style.display = 'none';
@@ -174,6 +196,13 @@ export function showAddGroupModal(onSuccess) {
       const nameVal = nameInput.value.trim();
       if (!nameVal) {
         errorBox.textContent = 'Guruh nomi bo\'sh bo\'lishi mumkin emas.';
+        errorBox.style.display = 'block';
+        nameInput.focus();
+        return;
+      }
+
+      if (nameVal.length > 150) {
+        errorBox.textContent = 'Guruh nomi 150 ta belgidan oshmasligi kerak.';
         errorBox.style.display = 'block';
         nameInput.focus();
         return;
@@ -196,7 +225,7 @@ export function showAddGroupModal(onSuccess) {
     }
   },
     el('div', { className: 'form-group' },
-      el('label', { className: 'form-label required' }, 'Guruh nomi'),
+      el('label', { className: 'form-label required', for: nameInputId }, 'Guruh nomi'),
       nameInput,
       el('span', { className: 'form-help' }, 'O\'quv kursi yoki guruhning aniq nomini kiriting.')
     ),
@@ -227,10 +256,13 @@ export function showAddGroupModal(onSuccess) {
  * @param {() => void} onSuccess
  */
 export function showEditGroupModal(group, onSuccess) {
+  const nameInputId = `edit-group-name-${group.id}`;
   const nameInput = el('input', {
     type: 'text',
+    id: nameInputId,
     className: 'form-input',
     value: group.name,
+    maxlength: '150',
     required: true,
     autocomplete: 'off'
   });
@@ -241,6 +273,7 @@ export function showEditGroupModal(group, onSuccess) {
   });
 
   const form = el('form', {
+    novalidate: true,
     onSubmit: async (e) => {
       e.preventDefault();
       errorBox.style.display = 'none';
@@ -248,6 +281,13 @@ export function showEditGroupModal(group, onSuccess) {
       const nameVal = nameInput.value.trim();
       if (!nameVal) {
         errorBox.textContent = 'Guruh nomi bo\'sh bo\'lishi mumkin emas.';
+        errorBox.style.display = 'block';
+        nameInput.focus();
+        return;
+      }
+
+      if (nameVal.length > 150) {
+        errorBox.textContent = 'Guruh nomi 150 ta belgidan oshmasligi kerak.';
         errorBox.style.display = 'block';
         nameInput.focus();
         return;
@@ -270,7 +310,7 @@ export function showEditGroupModal(group, onSuccess) {
     }
   },
     el('div', { className: 'form-group' },
-      el('label', { className: 'form-label required' }, 'Guruh nomi'),
+      el('label', { className: 'form-label required', for: nameInputId }, 'Guruh nomi'),
       nameInput
     ),
     errorBox,
@@ -357,8 +397,8 @@ export function confirmDeleteGroup(group, onSuccess) {
       type: 'button',
       className: 'btn btn-danger',
       onClick: async (e) => {
-        const btn = e.target;
-        btn.disabled = true;
+        const btn = e.currentTarget || e.target;
+        if (btn) btn.disabled = true;
         errorBox.style.display = 'none';
 
         try {
@@ -367,7 +407,7 @@ export function confirmDeleteGroup(group, onSuccess) {
           showToast('Guruh muvaffaqiyatli o\'chirildi.', 'success');
           if (typeof onSuccess === 'function') onSuccess();
         } catch (err) {
-          btn.disabled = false;
+          if (btn) btn.disabled = false;
           errorBox.textContent = err.message || 'O\'chirishda xatolik yuz berdi.';
           errorBox.style.display = 'block';
         }

@@ -5,6 +5,27 @@
 import { validatePaymentInput, idSchema } from '../validators/index.js';
 import { getCurrentUtcIsoString } from '../utils/date.js';
 
+const paymentStmtCache = new WeakMap();
+
+function getPaymentStmts(db) {
+  let stmts = paymentStmtCache.get(db);
+  if (!stmts) {
+    stmts = {
+      insert: db.prepare(
+        'INSERT INTO payments (student_id, amount, payment_date, created_at) VALUES (?, ?, ?, ?)'
+      ),
+      byStudent: db.prepare(
+        'SELECT id, student_id, amount, payment_date, created_at FROM payments WHERE student_id = ? ORDER BY payment_date ASC, id ASC'
+      ),
+      list: db.prepare(
+        'SELECT id, student_id, amount, payment_date, created_at FROM payments ORDER BY payment_date ASC, id ASC'
+      )
+    };
+    paymentStmtCache.set(db, stmts);
+  }
+  return stmts;
+}
+
 /**
  * Records a new payment using parameterized SQL.
  * Foreign-key constraint ensures student exists, otherwise throws constraint error.
@@ -17,10 +38,8 @@ export function createPayment(db, data) {
   const validated = validatePaymentInput(data);
   const createdAt = getCurrentUtcIsoString();
 
-  const stmt = db.prepare(
-    'INSERT INTO payments (student_id, amount, payment_date, created_at) VALUES (?, ?, ?, ?)'
-  );
-  const info = stmt.run(validated.student_id, validated.amount, validated.payment_date, createdAt);
+  const { insert } = getPaymentStmts(db);
+  const info = insert.run(validated.student_id, validated.amount, validated.payment_date, createdAt);
 
   return {
     id: Number(info.lastInsertRowid),
@@ -40,10 +59,8 @@ export function createPayment(db, data) {
  */
 export function getPaymentsByStudent(db, studentId) {
   const validStudentId = idSchema.parse(studentId);
-  const stmt = db.prepare(
-    'SELECT id, student_id, amount, payment_date, created_at FROM payments WHERE student_id = ? ORDER BY payment_date ASC, id ASC'
-  );
-  return stmt.all(validStudentId);
+  const { byStudent } = getPaymentStmts(db);
+  return byStudent.all(validStudentId);
 }
 
 /**
@@ -53,8 +70,6 @@ export function getPaymentsByStudent(db, studentId) {
  * @returns {Array<{ id: number, student_id: number, amount: number, payment_date: string, created_at: string }>}
  */
 export function listPayments(db) {
-  const stmt = db.prepare(
-    'SELECT id, student_id, amount, payment_date, created_at FROM payments ORDER BY payment_date ASC, id ASC'
-  );
-  return stmt.all();
+  const { list } = getPaymentStmts(db);
+  return list.all();
 }

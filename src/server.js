@@ -25,7 +25,9 @@ export function startServer(port = PORT, dbPath = DB_PATH) {
   const app = createApp(db);
 
   const server = app.listen(port, () => {
-    console.log(`Project Pay server running on port ${port}`);
+    const addr = server.address();
+    const boundPort = typeof addr === 'object' && addr ? addr.port : port;
+    console.log(`Project Pay server running on port ${boundPort}`);
   });
 
   return { app, server, db };

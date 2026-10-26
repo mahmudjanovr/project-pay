@@ -64,32 +64,56 @@ async function request(url, options = {}) {
 
   if (!response.ok) {
     const status = response.status;
+    const rawMessage = data && typeof data === 'object' && typeof data.message === 'string'
+      ? data.message
+      : '';
     let userMessage = '';
 
     if (status === 409) {
-      if (data && typeof data === 'object' && data.message) {
-        if (data.message.includes('assigned students')) {
-          userMessage = 'Ushbu guruhda o\'quvchilar mavjud bo\'lganligi sababli uni o\'chirib bo\'lmaydi.';
-        } else if (data.message.includes('already exists')) {
-          userMessage = 'Ushbu nomdagi guruh allaqachon mavjud.';
-        } else if (data.message.includes('payment history')) {
-          userMessage = 'Ushbu o\'quvchida to\'lovlar tarixi mavjud bo\'lganligi sababli uni o\'chirib bo\'lmaydi.';
-        } else {
-          userMessage = data.message;
-        }
+      if (rawMessage.includes('assigned students')) {
+        userMessage = 'Ushbu guruhda o\'quvchilar mavjud bo\'lganligi sababli uni o\'chirib bo\'lmaydi.';
+      } else if (rawMessage.includes('already exists')) {
+        userMessage = 'Ushbu nomdagi guruh allaqachon mavjud.';
+      } else if (rawMessage.includes('payment history')) {
+        userMessage = 'Ushbu o\'quvchida to\'lovlar tarixi mavjud bo\'lganligi sababli uni o\'chirib bo\'lmaydi.';
       } else {
         userMessage = 'Amalni bajarishda ziddiyat yuz berdi.';
       }
-    } else if (data && typeof data === 'object' && data.message) {
-      userMessage = data.message;
-    } else if (status === 400) {
-      userMessage = 'Kiritilgan ma\'lumotlar yaroqsiz.';
     } else if (status === 404) {
-      userMessage = 'So\'ralgan ma\'lumot topilmadi.';
+      if (rawMessage.includes('Student with ID')) {
+        userMessage = 'So\'ralgan o\'quvchi topilmadi.';
+      } else if (rawMessage.includes('Group with ID')) {
+        userMessage = 'So\'ralgan guruh topilmadi.';
+      } else {
+        userMessage = 'So\'ralgan ma\'lumot topilmadi.';
+      }
     } else if (status === 413) {
       userMessage = 'Yuborilgan ma\'lumot hajmi juda katta.';
     } else if (status >= 500) {
       userMessage = 'Serverda texnik xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko\'ring.';
+    } else if (status === 400) {
+      const lower = rawMessage.toLowerCase();
+      if (lower.includes('payment date') || lower.includes('calendar date')) {
+        userMessage = 'To\'lov sanasi haqiqiy taqvim sanasi bo\'lishi shart (YYYY-MM-DD).';
+      } else if (lower.includes('month') && !lower.includes('monthly')) {
+        userMessage = 'Hisobot oyi YYYY-MM formatida bo\'lishi kerak.';
+      } else if (lower.includes('student name') || lower.includes('full_name')) {
+        userMessage = 'O\'quvchi F.I.SH. to\'g\'ri kiritilishi shart (1–200 belgi).';
+      } else if (lower.includes('group name')) {
+        userMessage = 'Guruh nomi to\'g\'ri kiritilishi shart (1–150 belgi).';
+      } else if (lower.includes('phone')) {
+        userMessage = 'Telefon raqami 50 ta belgidan oshmasligi kerak.';
+      } else if (lower.includes('monthly fee') || lower.includes('monthly_fee')) {
+        userMessage = 'Oylik to\'lov noldan kichik bo\'lmagan butun son bo\'lishi shart.';
+      } else if (lower.includes('payment amount') || lower.includes('amount')) {
+        userMessage = 'To\'lov summasi musbat butun son bo\'lishi shart.';
+      } else if (lower.includes('malformed json')) {
+        userMessage = 'Yuborilgan so\'rov formati yaroqsiz (JSON xatosi).';
+      } else if (lower.includes('overflow') || lower.includes('safe integer')) {
+        userMessage = 'Hisob-kitob summasi ruxsat etilgan maksimal chegaradan oshib ketdi.';
+      } else {
+        userMessage = 'Kiritilgan ma\'lumotlar yaroqsiz.';
+      }
     } else {
       userMessage = `Xatolik yuz berdi (Status: ${status}).`;
     }
@@ -110,8 +134,11 @@ export async function fetchStudent(id) {
   return request(`/api/students/${id}`);
 }
 
-export async function createStudent({ full_name, monthly_fee, group_id = null }) {
+export async function createStudent({ full_name, phone, monthly_fee, group_id = null }) {
   const payload = { full_name, monthly_fee };
+  if (phone !== undefined) {
+    payload.phone = phone;
+  }
   if (group_id !== undefined) {
     payload.group_id = group_id;
   }
@@ -142,6 +169,10 @@ export async function fetchGroups() {
 
 export async function fetchGroup(id) {
   return request(`/api/groups/${id}`);
+}
+
+export async function fetchGroupStudents(id) {
+  return request(`/api/groups/${id}/students`);
 }
 
 export async function createGroup({ name }) {

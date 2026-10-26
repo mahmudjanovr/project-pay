@@ -447,6 +447,143 @@ test('Monthly Debtor Report Endpoint', async (t) => {
     const r5 = await fetch(`${ctx.baseUrl}/api/reports/debtors?month=2026/10`);
     assert.equal(r5.status, 400);
   });
+
+  await t.test('GET /debtors?month=YYYY-MM returns JSON debtors (not SPA HTML) matching /api/reports/debtors', async () => {
+    const res = await fetch(`${ctx.baseUrl}/debtors?month=2026-10`);
+    assert.equal(res.status, 200);
+    assert.ok(
+      res.headers.get('content-type')?.includes('application/json'),
+      'GET /debtors must return application/json, not text/html'
+    );
+
+    const debtors = await res.json();
+    const apiRes = await fetch(`${ctx.baseUrl}/api/reports/debtors?month=2026-10`);
+    const apiDebtors = await apiRes.json();
+    assert.deepEqual(debtors, apiDebtors);
+
+    assert.equal(debtors.length, 2);
+    const d1 = debtors.find((d) => d.student_id === s1.id);
+    assert.ok(d1);
+    assert.equal(d1.full_name, 'Debtor Student');
+    assert.equal(d1.monthly_fee, 1000000);
+    assert.equal(d1.total_paid, 400000);
+    assert.equal(d1.debt, 600000);
+  });
+
+  await t.test('GET /debtors rejects missing or invalid month with 400 JSON error format', async () => {
+    // Missing month
+    const rMissing = await fetch(`${ctx.baseUrl}/debtors`);
+    assert.equal(rMissing.status, 400);
+    assert.ok(rMissing.headers.get('content-type')?.includes('application/json'));
+    const errMissing = await rMissing.json();
+    assert.equal(errMissing.error, 'Bad Request');
+    assert.ok(errMissing.message.includes('month'));
+
+    // Invalid months
+    for (const badMonth of ['2026-13', '2026-00', '2026-1', '2026/10', 'invalid']) {
+      const rBad = await fetch(`${ctx.baseUrl}/debtors?month=${encodeURIComponent(badMonth)}`);
+      assert.equal(rBad.status, 400, `Expected 400 for month=${badMonth}`);
+      assert.ok(rBad.headers.get('content-type')?.includes('application/json'));
+      const errBad = await rBad.json();
+      assert.equal(errBad.error, 'Bad Request');
+    }
+  });
+});
+
+test('Student Phone API Support', async (t) => {
+  const ctx = createTestContext();
+  t.after(() => ctx.close());
+
+  let studentWithPhoneId;
+  let studentWithoutPhoneId;
+
+  await t.test('POST /api/students creates students with and without phone', async () => {
+    const res1 = await fetch(`${ctx.baseUrl}/api/students`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        full_name: 'Kamola Karimova',
+        phone: '  +998 90 123 45 67  ',
+        monthly_fee: 850000
+      })
+    });
+    assert.equal(res1.status, 201);
+    const s1 = await res1.json();
+    assert.equal(s1.phone, '+998 90 123 45 67');
+    studentWithPhoneId = s1.id;
+
+    const res2 = await fetch(`${ctx.baseUrl}/api/students`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        full_name: 'Sardor Rahimov',
+        monthly_fee: 700000
+      })
+    });
+    assert.equal(res2.status, 201);
+    const s2 = await res2.json();
+    assert.equal(s2.phone, null);
+    studentWithoutPhoneId = s2.id;
+  });
+
+  await t.test('GET /api/students and GET /api/students/:id return phone field', async () => {
+    const resOne = await fetch(`${ctx.baseUrl}/api/students/${studentWithPhoneId}`);
+    assert.equal(resOne.status, 200);
+    const one = await resOne.json();
+    assert.equal(one.phone, '+998 90 123 45 67');
+
+    const resList = await fetch(`${ctx.baseUrl}/api/students`);
+    assert.equal(resList.status, 200);
+    const list = await resList.json();
+    assert.equal(list.find((s) => s.id === studentWithPhoneId).phone, '+998 90 123 45 67');
+    assert.equal(list.find((s) => s.id === studentWithoutPhoneId).phone, null);
+  });
+
+  await t.test('PATCH /api/students/:id updates, preserves, and clears phone while rejecting unknown keys', async () => {
+    // Update phone on student who previously had none
+    const rSet = await fetch(`${ctx.baseUrl}/api/students/${studentWithoutPhoneId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: '+998 99 888 77 66' })
+    });
+    assert.equal(rSet.status, 200);
+    assert.equal((await rSet.json()).phone, '+998 99 888 77 66');
+
+    // Update monthly_fee without touching phone
+    const rPreserve = await fetch(`${ctx.baseUrl}/api/students/${studentWithPhoneId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ monthly_fee: 900000 })
+    });
+    assert.equal(rPreserve.status, 200);
+    const preserved = await rPreserve.json();
+    assert.equal(preserved.phone, '+998 90 123 45 67');
+    assert.equal(preserved.monthly_fee, 900000);
+
+    // Clear phone using blank string
+    const rClear = await fetch(`${ctx.baseUrl}/api/students/${studentWithPhoneId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: '   ' })
+    });
+    assert.equal(rClear.status, 200);
+    assert.equal((await rClear.json()).phone, null);
+
+    // Reject non-string phone and unknown keys
+    const rBadType = await fetch(`${ctx.baseUrl}/api/students/${studentWithPhoneId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: 998901234567 })
+    });
+    assert.equal(rBadType.status, 400);
+
+    const rUnknownKey = await fetch(`${ctx.baseUrl}/api/students/${studentWithPhoneId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: '+99890', unexpected: 'key' })
+    });
+    assert.equal(rUnknownKey.status, 400);
+  });
 });
 
 test('Unknown routes, malformed payloads, and server error handling', async (t) => {

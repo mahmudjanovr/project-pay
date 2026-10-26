@@ -6,6 +6,7 @@
 import { fetchStudents, fetchMonthlyDebtors } from '../api.js';
 import { formatUzbekSom, formatMonthName, getCurrentLocalMonthString } from '../formatters.js';
 import { el, clearElement } from '../dom.js';
+import { createPageShell, renderStateView } from '../pageLayout.js';
 
 /**
  * Renders the Dashboard view into the target container.
@@ -13,13 +14,11 @@ import { el, clearElement } from '../dom.js';
  * @param {HTMLElement} container
  */
 export async function renderDashboard(container) {
-  clearElement(container);
-
   const loadingEl = el('div', { className: 'loading-indicator' },
     el('div', { className: 'spinner' }),
     el('p', {}, 'Bosh sahifa ma\'lumotlari yuklanmoqda...')
   );
-  container.appendChild(loadingEl);
+  renderStateView(container, loadingEl);
 
   const currentMonth = getCurrentLocalMonthString();
 
@@ -31,12 +30,12 @@ export async function renderDashboard(container) {
 
     clearElement(container);
 
-    // Calculate total debt accurately from real debtor rows
-    let totalDebt = 0;
-    let totalCollected = 0;
+    // Calculate total debt accurately from real debtor rows using BigInt to prevent safe-integer overflow
+    let totalDebt = 0n;
+    let totalCollected = 0n;
     for (const d of debtors) {
-      if (Number.isSafeInteger(d.debt)) totalDebt += d.debt;
-      if (Number.isSafeInteger(d.total_paid)) totalCollected += d.total_paid;
+      if (Number.isSafeInteger(d.debt)) totalDebt += BigInt(d.debt);
+      if (Number.isSafeInteger(d.total_paid)) totalCollected += BigInt(d.total_paid);
     }
 
     // Page Header
@@ -101,7 +100,7 @@ export async function renderDashboard(container) {
     );
 
     // Debtors Preview Table Card
-    const previewCard = el('div', { className: 'card' },
+    const previewCard = el('div', { className: debtors.length > 0 ? 'card card-table' : 'card' },
       el('div', { className: 'card-header' },
         el('h2', { className: 'card-title' }, `${formatMonthName(currentMonth)} qarzdorlik holati`),
         el('a', { href: '#/debtors', className: 'btn btn-secondary btn-sm' }, 'Barcha qarzdorlarni ko\'rish →')
@@ -111,14 +110,15 @@ export async function renderDashboard(container) {
       )
     );
 
-    container.appendChild(pageHeader);
-    container.appendChild(statsGrid);
-    container.appendChild(quickActionsGrid);
-    container.appendChild(previewCard);
+    const shell = createPageShell({
+      header: pageHeader,
+      body: [statsGrid, quickActionsGrid, previewCard]
+    });
+    container.appendChild(shell.element);
 
   } catch (err) {
-    clearElement(container);
-    container.appendChild(
+    renderStateView(
+      container,
       el('div', { className: 'error-banner' },
         el('span', {}, err.message || 'Ma\'lumotlarni yuklashda xatolik yuz berdi.'),
         el('button', {

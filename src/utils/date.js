@@ -104,6 +104,8 @@ export function getMonthDateRange(reportMonth) {
   const month = parseInt(monthStr, 10);
 
   const startOfMonth = `${reportMonth}-01`;
+  const lastDay = String(getDaysInMonth(year, month)).padStart(2, '0');
+  const endOfMonth = `${reportMonth}-${lastDay}`;
 
   let nextYear = year;
   let nextMonth = month + 1;
@@ -115,7 +117,7 @@ export function getMonthDateRange(reportMonth) {
   const nextMonthPadded = String(nextMonth).padStart(2, '0');
   const startOfNextMonth = `${String(nextYear).padStart(4, '0')}-${nextMonthPadded}-01`;
 
-  return { startOfMonth, startOfNextMonth };
+  return { startOfMonth, endOfMonth, startOfNextMonth };
 }
 
 /**

@@ -2,9 +2,11 @@
  * Student Details & Payment History View for Project Pay.
  */
 
-import { fetchStudent, fetchStudentPayments } from '../api.js';
+import { fetchStudent, fetchStudentPayments, fetchGroups } from '../api.js';
 import { formatUzbekSom, formatDate } from '../formatters.js';
 import { el, clearElement } from '../dom.js';
+import { showEditStudentModal } from './students.js';
+import { createPageShell, renderStateView } from '../pageLayout.js';
 
 /**
  * Renders the Student Detail & Payment History view into the target container.
@@ -13,27 +15,26 @@ import { el, clearElement } from '../dom.js';
  * @param {string} studentId
  */
 export async function renderStudentDetail(container, studentId) {
-  clearElement(container);
-
   const loadingEl = el('div', { className: 'loading-indicator' },
     el('div', { className: 'spinner' }),
     el('p', {}, 'O\'quvchi ma\'lumotlari yuklanmoqda...')
   );
-  container.appendChild(loadingEl);
+  renderStateView(container, loadingEl);
 
   try {
-    const [student, payments] = await Promise.all([
+    const [student, payments, groups] = await Promise.all([
       fetchStudent(studentId),
-      fetchStudentPayments(studentId)
+      fetchStudentPayments(studentId),
+      fetchGroups()
     ]);
 
     clearElement(container);
 
-    // Calculate total payments made by this student across all time
-    let allTimePaid = 0;
+    // Calculate total payments made by this student across all time using BigInt to prevent safe-integer overflow
+    let allTimePaid = 0n;
     for (const p of payments) {
       if (Number.isSafeInteger(p.amount)) {
-        allTimePaid += p.amount;
+        allTimePaid += BigInt(p.amount);
       }
     }
 
@@ -49,10 +50,15 @@ export async function renderStudentDetail(container, studentId) {
         ),
         el('h1', { className: 'page-title' }, student.full_name),
         el('p', { className: 'page-description' },
-          `ID: ${student.id} | Guruh: ${student.group_name || 'Guruhsiz'} | Ro'yxatdan o'tgan sana: ${formatDate(student.created_at)}`
+          `ID: #${student.id} | Telefon: ${student.phone || 'Kiritilmagan'} | Guruh: ${student.group_name || 'Guruhsiz'} | Ro'yxatdan o'tgan sana: ${formatDate(student.created_at)}`
         )
       ),
       el('div', { className: 'page-actions' },
+        el('button', {
+          type: 'button',
+          className: 'btn btn-secondary',
+          onClick: () => showEditStudentModal(student, groups, () => renderStudentDetail(container, studentId))
+        }, 'Tahrirlash'),
         el('a', {
           href: `#/payments?student_id=${student.id}`,
           className: 'btn btn-primary'
@@ -63,12 +69,12 @@ export async function renderStudentDetail(container, studentId) {
     // Student Info Card
     const infoGrid = el('div', { className: 'stats-grid' },
       el('div', { className: 'stat-card' },
-        el('span', { className: 'stat-label' }, 'Biriktirilgan guruh'),
+        el('span', { className: 'stat-label' }, 'Biriktirilgan guruh va aloqa'),
         el('div', { className: 'stat-value', style: 'font-size: 1.25rem;' },
           student.group_name ? student.group_name : 'Guruhsiz'
         ),
         el('span', { className: 'stat-desc' },
-          student.group_name ? 'O\'quvchi faol o\'quv guruhi' : 'Guruhga biriktirilmagan'
+          student.phone ? `Telefon: ${student.phone}` : 'Telefon raqami kiritilmagan'
         )
       ),
       el('div', { className: 'stat-card' },
@@ -89,7 +95,7 @@ export async function renderStudentDetail(container, studentId) {
     );
 
     // Payment History Card
-    const paymentsCard = el('div', { className: 'card' },
+    const paymentsCard = el('div', { className: payments.length > 0 ? 'card card-table' : 'card' },
       el('div', { className: 'card-header' },
         el('h2', { className: 'card-title' }, 'To\'lovlar tarixi'),
         el('span', { style: 'font-size: 0.8125rem; color: var(--text-muted);' },
@@ -101,13 +107,15 @@ export async function renderStudentDetail(container, studentId) {
       )
     );
 
-    container.appendChild(pageHeader);
-    container.appendChild(infoGrid);
-    container.appendChild(paymentsCard);
+    const shell = createPageShell({
+      header: pageHeader,
+      body: [infoGrid, paymentsCard]
+    });
+    container.appendChild(shell.element);
 
   } catch (err) {
-    clearElement(container);
-    container.appendChild(
+    renderStateView(
+      container,
       el('div', { className: 'error-banner' },
         el('span', {}, err.message || 'O\'quvchi ma\'lumotlarini yuklashda xatolik yuz berdi.'),
         el('a', {

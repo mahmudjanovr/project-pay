@@ -12,7 +12,7 @@ import { initDatabase } from './db/init.js';
 import { createStudentRouter } from './routes/students.js';
 import { createGroupRouter } from './routes/groups.js';
 import { createPaymentRouter } from './routes/payments.js';
-import { createReportRouter } from './routes/reports.js';
+import { createReportRouter, createDebtorsHandler } from './routes/reports.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,6 +44,9 @@ export function createApp(database) {
   app.use('/api/payments', createPaymentRouter(db));
   app.use('/api/reports', createReportRouter(db));
 
+  // Required top-level debtor report endpoint: GET /debtors?month=YYYY-MM
+  app.get('/debtors', createDebtorsHandler(db));
+
   // Serve frontend static assets (HTML, CSS, client ES Modules)
   app.use(express.static(publicDir));
 
@@ -55,9 +58,10 @@ export function createApp(database) {
     });
   });
 
-  // SPA Navigation fallback for non-API GET requests
+  // SPA Navigation fallback for non-API GET requests without file extensions
   app.use((req, res) => {
-    if (req.method === 'GET' && !req.originalUrl.startsWith('/api')) {
+    const hasFileExtension = path.extname(req.path) !== '' && req.path !== '/index.html';
+    if ((req.method === 'GET' || req.method === 'HEAD') && !req.originalUrl.startsWith('/api') && !hasFileExtension) {
       return res.sendFile(path.join(publicDir, 'index.html'));
     }
     res.status(404).json({

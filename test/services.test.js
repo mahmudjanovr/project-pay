@@ -71,11 +71,54 @@ test('Student service operations', async (t) => {
     assert.throws(() => updateStudent(db, original.id, {}), /At least one field/);
   });
 
+  await t.test('creates, retrieves, updates, preserves, and clears optional student phone', () => {
+    // Omitted phone defaults to null
+    const sNoPhone = createStudent(db, { full_name: 'No Phone Student', monthly_fee: 400000 });
+    assert.equal(sNoPhone.phone, null);
+
+    // Blank phone normalizes to null
+    const sBlankPhone = createStudent(db, { full_name: 'Blank Phone Student', phone: '   ', monthly_fee: 400000 });
+    assert.equal(sBlankPhone.phone, null);
+
+    // Trimmed valid phone stored and returned
+    const sWithPhone = createStudent(db, {
+      full_name: 'Phone Student',
+      phone: '  +998 90 123 45 67  ',
+      monthly_fee: 900000
+    });
+    assert.equal(sWithPhone.phone, '+998 90 123 45 67');
+    assert.equal(getStudentById(db, sWithPhone.id).phone, '+998 90 123 45 67');
+
+    // listStudents includes phone field for all records
+    const all = listStudents(db);
+    assert.equal(all.find((s) => s.id === sNoPhone.id).phone, null);
+    assert.equal(all.find((s) => s.id === sWithPhone.id).phone, '+998 90 123 45 67');
+
+    // Updating another field preserves existing phone
+    const afterFeeUpdate = updateStudent(db, sWithPhone.id, { monthly_fee: 950000 });
+    assert.equal(afterFeeUpdate.phone, '+998 90 123 45 67');
+    assert.equal(afterFeeUpdate.monthly_fee, 950000);
+
+    // Updating only phone works and preserves other fields
+    const afterPhoneUpdate = updateStudent(db, sNoPhone.id, { phone: '+998 93 555 66 77' });
+    assert.equal(afterPhoneUpdate.phone, '+998 93 555 66 77');
+    assert.equal(afterPhoneUpdate.full_name, 'No Phone Student');
+
+    // Clearing phone via blank string or null sets phone to null
+    const clearedViaBlank = updateStudent(db, sNoPhone.id, { phone: '   ' });
+    assert.equal(clearedViaBlank.phone, null);
+
+    const clearedViaNull = updateStudent(db, sWithPhone.id, { phone: null });
+    assert.equal(clearedViaNull.phone, null);
+  });
+
   await t.test('rejects invalid student inputs', () => {
     assert.throws(() => createStudent(db, { full_name: '   ', monthly_fee: 500000 }), /empty/);
     assert.throws(() => createStudent(db, { full_name: 'Valid', monthly_fee: -100 }), /non-negative/);
     assert.throws(() => createStudent(db, { full_name: 'Valid', monthly_fee: 100.5 }), /safe integer/);
     assert.throws(() => createStudent(db, { full_name: 'Valid', monthly_fee: '500000' }), /number/);
+    assert.throws(() => createStudent(db, { full_name: 'Valid', phone: 123456, monthly_fee: 500000 }), /string/);
+    assert.throws(() => updateStudent(db, 1, { unknown_field: 'x' }));
   });
 });
 

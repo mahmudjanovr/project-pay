@@ -23,6 +23,8 @@ export function el(tag, props = {}, ...children) {
 
       if (key === 'className' || key === 'class') {
         element.className = String(value);
+      } else if (key === 'htmlFor') {
+        element.setAttribute('for', String(value));
       } else if (key.startsWith('on') && typeof value === 'function') {
         const eventName = key.substring(2).toLowerCase();
         element.addEventListener(eventName, value);

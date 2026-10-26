@@ -121,6 +121,8 @@ export function createStudentCombobox({
     highlightedIndex = index;
   }
 
+  const MAX_VISIBLE_OPTIONS = 100;
+
   function renderList() {
     clearElement(dropdownList);
 
@@ -134,7 +136,9 @@ export function createStudentCombobox({
       return;
     }
 
-    filteredStudents.forEach((student, index) => {
+    const visibleStudents = filteredStudents.slice(0, MAX_VISIBLE_OPTIONS);
+
+    visibleStudents.forEach((student, index) => {
       const optionId = `student-option-${student.id}`;
       const optionEl = el('div', {
         id: optionId,
@@ -163,6 +167,16 @@ export function createStudentCombobox({
 
       dropdownList.appendChild(optionEl);
     });
+
+    if (filteredStudents.length > MAX_VISIBLE_OPTIONS) {
+      dropdownList.appendChild(
+        el('div', {
+          className: 'combobox-more-hint',
+          role: 'status',
+          style: 'padding: var(--space-2) var(--space-4); font-size: 0.75rem; color: var(--text-muted); text-align: center; background-color: var(--bg-subtle); border-top: 1px solid var(--border-light);'
+        }, `Dastlabki ${MAX_VISIBLE_OPTIONS} ta natija ko'rsatildi (jami ${filteredStudents.length} ta). Aniqroq topish uchun qidiruvga yozing.`)
+      );
+    }
   }
 
   function filter(query) {
@@ -253,8 +267,13 @@ export function createStudentCombobox({
   });
 
   searchInput.addEventListener('keydown', (e) => {
+    const visibleCount = Math.min(filteredStudents.length, MAX_VISIBLE_OPTIONS);
+
     if (!isOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       openDropdown();
+      if (visibleCount > 0) {
+        setHighlighted(e.key === 'ArrowDown' ? 0 : visibleCount - 1);
+      }
       e.preventDefault();
       return;
     }
@@ -262,23 +281,23 @@ export function createStudentCombobox({
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
-        if (filteredStudents.length > 0) {
-          const nextIndex = highlightedIndex < filteredStudents.length - 1 ? highlightedIndex + 1 : 0;
+        if (visibleCount > 0) {
+          const nextIndex = highlightedIndex < visibleCount - 1 ? highlightedIndex + 1 : 0;
           setHighlighted(nextIndex);
         }
         break;
 
       case 'ArrowUp':
         e.preventDefault();
-        if (filteredStudents.length > 0) {
-          const prevIndex = highlightedIndex > 0 ? highlightedIndex - 1 : filteredStudents.length - 1;
+        if (visibleCount > 0) {
+          const prevIndex = highlightedIndex > 0 ? highlightedIndex - 1 : visibleCount - 1;
           setHighlighted(prevIndex);
         }
         break;
 
       case 'Enter':
         e.preventDefault();
-        if (isOpen && highlightedIndex >= 0 && highlightedIndex < filteredStudents.length) {
+        if (isOpen && highlightedIndex >= 0 && highlightedIndex < visibleCount) {
           selectStudent(filteredStudents[highlightedIndex]);
         } else if (isOpen && filteredStudents.length === 1) {
           selectStudent(filteredStudents[0]);
@@ -298,6 +317,10 @@ export function createStudentCombobox({
 
   // Document click listener to close dropdown on outside clicks
   function handleDocumentClick(e) {
+    if (container.isConnected === false) {
+      document.removeEventListener('click', handleDocumentClick);
+      return;
+    }
     if (!container.contains(e.target)) {
       closeDropdown();
     }

@@ -7,7 +7,11 @@ import { el, clearElement } from './dom.js';
 let modalOverlay = null;
 
 function getModalOverlay() {
-  if (!modalOverlay) {
+  if (
+    !modalOverlay ||
+    modalOverlay.isConnected === false ||
+    (modalOverlay.ownerDocument && modalOverlay.ownerDocument !== document)
+  ) {
     modalOverlay = document.getElementById('modal-overlay');
     if (!modalOverlay) {
       modalOverlay = el('div', {
@@ -15,6 +19,7 @@ function getModalOverlay() {
         className: 'modal-overlay',
         role: 'dialog',
         'aria-modal': 'true',
+        'aria-hidden': 'true',
         tabIndex: -1
       });
       document.body.appendChild(modalOverlay);
@@ -37,8 +42,15 @@ let activeCloseCallback = null;
  */
 export function openModal({ title, body, footer, onClose }) {
   const overlay = getModalOverlay();
-  clearElement(overlay);
 
+  // Invoke any previous modal cleanup before replacing modal content
+  if (typeof activeCloseCallback === 'function') {
+    const prevCallback = activeCloseCallback;
+    activeCloseCallback = null;
+    prevCallback();
+  }
+
+  clearElement(overlay);
   activeCloseCallback = onClose || null;
 
   const closeButton = el('button', {
@@ -49,7 +61,7 @@ export function openModal({ title, body, footer, onClose }) {
   }, '×');
 
   const header = el('div', { className: 'modal-header' },
-    el('h3', { className: 'modal-title' }, title),
+    el('h3', { className: 'modal-title', id: 'modal-dialog-title' }, title),
     closeButton
   );
 
@@ -65,6 +77,8 @@ export function openModal({ title, body, footer, onClose }) {
   const dialog = el('div', { className: 'modal-dialog' }, ...dialogChildren);
 
   overlay.appendChild(dialog);
+  overlay.setAttribute('aria-labelledby', 'modal-dialog-title');
+  overlay.setAttribute('aria-hidden', 'false');
 
   // Close when clicking directly on overlay background
   overlay.onclick = (e) => {
@@ -76,11 +90,16 @@ export function openModal({ title, body, footer, onClose }) {
   overlay.classList.add('active');
 
   // Keydown handler for Escape key
+  document.removeEventListener('keydown', handleKeyDown);
   document.addEventListener('keydown', handleKeyDown);
 
-  // Auto-focus first input if present
+  // Auto-focus first visible interactive control if modal remains open
   setTimeout(() => {
-    const firstInput = dialog.querySelector('input, select, textarea, button:not(.modal-close)');
+    if (!overlay.classList.contains('active')) return;
+    const candidates = Array.from(
+      dialog.querySelectorAll('input, select, textarea, button:not(.modal-close)')
+    );
+    const firstInput = candidates.find((node) => node.getAttribute('type') !== 'hidden');
     if (firstInput) {
       firstInput.focus();
     }
@@ -98,11 +117,18 @@ function handleKeyDown(e) {
  */
 export function closeModal() {
   const overlay = getModalOverlay();
+  const isOpen = overlay.classList.contains('active');
+  if (!isOpen && !activeCloseCallback) {
+    return;
+  }
+
   overlay.classList.remove('active');
+  overlay.setAttribute('aria-hidden', 'true');
   document.removeEventListener('keydown', handleKeyDown);
 
   if (typeof activeCloseCallback === 'function') {
-    activeCloseCallback();
+    const callback = activeCloseCallback;
     activeCloseCallback = null;
+    callback();
   }
 }

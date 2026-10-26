@@ -75,6 +75,15 @@ export const migrations = [
 
       db.exec('CREATE INDEX IF NOT EXISTS idx_students_group_id ON students (group_id);');
     }
+  },
+  {
+    version: '004_add_student_phone',
+    up(db) {
+      const studentColumns = db.prepare('PRAGMA table_info(students)').all();
+      const hasPhone = studentColumns.some((col) => col.name === 'phone');
+      if (!hasPhone) {
+        db.exec('ALTER TABLE students ADD COLUMN phone TEXT;');
+      }
+    }
   }
 ];
-

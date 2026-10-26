@@ -9,7 +9,8 @@ import {
   getGroupById,
   createGroup,
   updateGroup,
-  deleteGroup
+  deleteGroup,
+  getStudentsByGroupId
 } from '../src/services/groups.js';
 import {
   createStudent,
@@ -415,6 +416,29 @@ test('Student and Group Service Integration', async (t) => {
     assert.ok(groupAfter);
     assert.equal(groupAfter.student_count, 0);
   });
+
+  await t.test('getStudentsByGroupId returns only students assigned to the group', () => {
+    // Dilshod is currently unassigned (group_id: null). Assign Dilshod to groupA.
+    updateStudent(db, 1, { group_id: groupA.id });
+
+    // Create another student in groupA
+    const sNew = createStudent(db, {
+      full_name: 'Anvar Sodiqov',
+      monthly_fee: 1200000,
+      group_id: groupA.id
+    });
+
+    const studentsGroupA = getStudentsByGroupId(db, groupA.id);
+    assert.equal(studentsGroupA.length, 2);
+    assert.equal(studentsGroupA[0].id, 1);
+    assert.equal(studentsGroupA[0].group_name, 'Guruh A');
+    assert.equal(studentsGroupA[1].id, sNew.id);
+    assert.equal(studentsGroupA[1].group_name, 'Guruh A');
+
+    // Group B currently has 0 students
+    const studentsGroupB = getStudentsByGroupId(db, groupB.id);
+    assert.deepEqual(studentsGroupB, []);
+  });
 });
 
 test('Financial Calculations and Debtor Reports Independence from Groups', async (t) => {
@@ -530,6 +554,17 @@ test('Groups API Endpoints', async (t) => {
     assert.equal(data[0].id, testGroupId);
     assert.equal(data[0].name, 'Foundation English');
     assert.equal(data[0].student_count, 0);
+  });
+
+  await t.test('GET /api/groups/:id returns single group or 404', async () => {
+    const res1 = await fetch(`${ctx.baseUrl}/api/groups/${testGroupId}`);
+    assert.equal(res1.status, 200);
+    const data1 = await res1.json();
+    assert.equal(data1.id, testGroupId);
+    assert.equal(data1.name, 'Foundation English');
+
+    const res2 = await fetch(`${ctx.baseUrl}/api/groups/99999`);
+    assert.equal(res2.status, 404);
   });
 
   await t.test('PATCH /api/groups/:id renames group', async () => {
@@ -709,5 +744,29 @@ test('Groups API Endpoints', async (t) => {
     assert.ok(found);
     assert.equal(found.group_id, group.id);
     assert.equal(found.group_name, 'Cybersecurity');
+  });
+
+  await t.test('GET /api/groups/:id/students returns students belonging to group or 404', async () => {
+    // We have group Cybersecurity with student 1
+    const gRes = await fetch(`${ctx.baseUrl}/api/groups`);
+    const allGroups = await gRes.json();
+    const cyberGroup = allGroups.find((g) => g.name === 'Cybersecurity');
+    assert.ok(cyberGroup);
+
+    const res = await fetch(`${ctx.baseUrl}/api/groups/${cyberGroup.id}/students`);
+    assert.equal(res.status, 200);
+    const students = await res.json();
+    assert.equal(students.length, 1);
+    assert.equal(students[0].id, 1);
+    assert.equal(students[0].group_id, cyberGroup.id);
+    assert.equal(students[0].group_name, 'Cybersecurity');
+
+    // 404 for non-existent group
+    const notFoundRes = await fetch(`${ctx.baseUrl}/api/groups/99999/students`);
+    assert.equal(notFoundRes.status, 404);
+
+    // 400 for invalid ID parameter
+    const badReqRes = await fetch(`${ctx.baseUrl}/api/groups/invalid_id/students`);
+    assert.equal(badReqRes.status, 400);
   });
 });

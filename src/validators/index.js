@@ -16,7 +16,8 @@ export const studentNameSchema = z.string({
   message: 'Student name must be a string'
 })
   .trim()
-  .min(1, { message: 'Student name cannot be empty' });
+  .min(1, { message: 'Student name cannot be empty' })
+  .max(200, { message: 'Student name cannot exceed 200 characters' });
 
 /**
  * Validates monthly fee in Uzbek Som (UZS):
@@ -123,7 +124,8 @@ export const groupNameSchema = z.string({
   message: 'Group name must be a string'
 })
   .trim()
-  .min(1, { message: 'Group name cannot be empty' });
+  .min(1, { message: 'Group name cannot be empty' })
+  .max(150, { message: 'Group name cannot exceed 150 characters' });
 
 /**
  * Validates group ID:
@@ -146,10 +148,26 @@ export const updateGroupSchema = z.object({
 }).strict();
 
 /**
+ * Validates optional student phone number:
+ * - Must be a string or null (no silent coercion from numbers/booleans).
+ * - Trims surrounding whitespace.
+ * - Normalizes empty/blank strings to null.
+ * - Rejects overly long values (> 50 chars).
+ */
+export const studentPhoneSchema = z.string({
+  message: 'Student phone must be a string'
+})
+  .trim()
+  .max(50, { message: 'Student phone cannot exceed 50 characters' })
+  .nullable()
+  .transform((val) => (val === null || val === '' ? null : val));
+
+/**
  * Schema for creating a student record.
  */
 export const createStudentSchema = z.object({
   full_name: studentNameSchema,
+  phone: studentPhoneSchema.optional(),
   monthly_fee: monthlyFeeSchema,
   group_id: groupIdSchema.optional()
 }).strict();
@@ -160,14 +178,19 @@ export const createStudentSchema = z.object({
  */
 export const updateStudentSchema = z.object({
   full_name: studentNameSchema.optional(),
+  phone: studentPhoneSchema.optional(),
   monthly_fee: monthlyFeeSchema.optional(),
   group_id: groupIdSchema.optional()
 })
   .strict()
   .refine(
-    (data) => data.full_name !== undefined || data.monthly_fee !== undefined || data.group_id !== undefined,
+    (data) =>
+      data.full_name !== undefined ||
+      data.phone !== undefined ||
+      data.monthly_fee !== undefined ||
+      data.group_id !== undefined,
     {
-      message: 'At least one field (full_name, monthly_fee, or group_id) must be provided for update'
+      message: 'At least one field (full_name, phone, monthly_fee, or group_id) must be provided for update'
     }
   );
 
@@ -175,7 +198,7 @@ export const updateStudentSchema = z.object({
  * Validates partial student update input fields.
  *
  * @param {unknown} input
- * @returns {{ full_name?: string, monthly_fee?: number, group_id?: number|null }}
+ * @returns {{ full_name?: string, phone?: string|null, monthly_fee?: number, group_id?: number|null }}
  */
 export function validateUpdateStudentInput(input) {
   return updateStudentSchema.parse(input);
@@ -251,6 +274,16 @@ export function validatePaymentInput(input) {
  */
 export function validateStudentName(name) {
   return studentNameSchema.parse(name);
+}
+
+/**
+ * Validates and normalizes an optional student phone value.
+ *
+ * @param {unknown} phone
+ * @returns {string | null}
+ */
+export function validateStudentPhone(phone) {
+  return studentPhoneSchema.parse(phone);
 }
 
 /**

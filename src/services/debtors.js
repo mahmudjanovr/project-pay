@@ -8,7 +8,7 @@ import { getMonthDateRange } from '../utils/date.js';
 
 /**
  * SQL query to calculate monthly debtors.
- * - Computes total payments for each student within [startOfMonth, startOfNextMonth).
+ * - Computes total payments for each student within [startOfMonth, endOfMonth].
  * - Debt = MAX(0, monthly_fee - total_paid).
  * - Restricts to students where total_paid < monthly_fee.
  * - Uses LEFT JOIN and COALESCE so students with no payments are retained.
@@ -28,12 +28,23 @@ export const MONTHLY_DEBTORS_QUERY = `
       student_id,
       SUM(amount) AS total_paid
     FROM payments
-    WHERE payment_date >= ? AND payment_date < ?
+    WHERE payment_date >= ? AND payment_date <= ?
     GROUP BY student_id
   ) p ON s.id = p.student_id
   WHERE COALESCE(p.total_paid, 0) < s.monthly_fee
   ORDER BY s.id ASC;
 `;
+
+const debtorsStmtCache = new WeakMap();
+
+function getDebtorsStmt(db) {
+  let stmt = debtorsStmtCache.get(db);
+  if (!stmt) {
+    stmt = db.prepare(MONTHLY_DEBTORS_QUERY);
+    debtorsStmtCache.set(db, stmt);
+  }
+  return stmt;
+}
 
 /**
  * Calculates and returns debtors for a specified report month (YYYY-MM).
@@ -52,10 +63,18 @@ export const MONTHLY_DEBTORS_QUERY = `
 export function getMonthlyDebtors(db, reportMonth) {
   // Validate report month format and calendar range
   const validMonth = validateReportMonth(reportMonth);
-  const { startOfMonth, startOfNextMonth } = getMonthDateRange(validMonth);
+  const { startOfMonth, endOfMonth } = getMonthDateRange(validMonth);
 
-  const stmt = db.prepare(MONTHLY_DEBTORS_QUERY);
-  const rows = stmt.all(startOfMonth, startOfNextMonth);
+  const stmt = getDebtorsStmt(db);
+  let rows;
+  try {
+    rows = stmt.all(startOfMonth, endOfMonth);
+  } catch (err) {
+    if (err && typeof err.message === 'string' && err.message.toLowerCase().includes('integer overflow')) {
+      throw new RangeError('Financial calculation overflow detected during monthly payment aggregation.');
+    }
+    throw err;
+  }
 
   for (const row of rows) {
     if (!Number.isSafeInteger(row.total_paid) || !Number.isSafeInteger(row.debt)) {
