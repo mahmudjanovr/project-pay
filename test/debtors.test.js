@@ -199,3 +199,45 @@ test('SQL parameterization and injection prevention', async (t) => {
     assert.equal(count.count, 1);
   });
 });
+
+test('Financial integrity and overflow handling in debtor calculations', async (t) => {
+  const db = createDatabase(':memory:');
+  initDatabase(db);
+
+  await t.test('calculates debt correctly for maximum supported financial amounts', () => {
+    // 9,007,199,254,740,991 is Number.MAX_SAFE_INTEGER
+    const MAX = 9007199254740991;
+    const student = createStudent(db, { full_name: 'Max Student', monthly_fee: MAX });
+    createPayment(db, { student_id: student.id, amount: 5000000000000000, payment_date: '2026-10-15' });
+
+    const debtors = getMonthlyDebtors(db, '2026-10');
+    assert.equal(debtors.length, 1);
+    assert.equal(debtors[0].student_id, student.id);
+    assert.equal(debtors[0].total_paid, 5000000000000000);
+    assert.equal(debtors[0].debt, 4007199254740991);
+    assert.ok(Number.isSafeInteger(debtors[0].debt));
+    assert.ok(Number.isSafeInteger(debtors[0].total_paid));
+  });
+
+  await t.test('detects integer overflow in payment aggregation and throws RangeError without returning corrupt total', () => {
+    // Isolated db to test corrupt or raw values exceeding safe integer range
+    const rawDb = createDatabase(':memory:');
+    rawDb.exec(`
+      CREATE TABLE students (id INTEGER PRIMARY KEY, full_name TEXT, monthly_fee REAL);
+      CREATE TABLE payments (id INTEGER PRIMARY KEY, student_id INTEGER, amount REAL, payment_date TEXT);
+    `);
+
+    // Student has a fee beyond safe integer (e.g. legacy/corrupt record: 10^17)
+    // Payments exceed Number.MAX_SAFE_INTEGER (9,007,199,254,740,991)
+    rawDb.prepare("INSERT INTO students VALUES (1, 'Overflow Student', 100000000000000000)").run();
+    rawDb.prepare("INSERT INTO payments VALUES (1, 1, 9007199254740992, '2026-10-10')").run();
+
+    assert.throws(
+      () => getMonthlyDebtors(rawDb, '2026-10'),
+      (err) => {
+        return err instanceof RangeError && err.message.includes('Financial calculation overflow detected');
+      }
+    );
+  });
+});
+

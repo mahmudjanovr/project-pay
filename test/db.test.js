@@ -55,9 +55,10 @@ test('Database initialization and repeat initialization', async (t) => {
       const payments = db.prepare('SELECT COUNT(*) as count FROM payments').get();
       assert.equal(payments.count, 0, 'No demo payment records should exist');
 
-      const migrations = db.prepare('SELECT * FROM schema_migrations').all();
-      assert.equal(migrations.length, 1);
+      const migrations = db.prepare('SELECT * FROM schema_migrations ORDER BY id ASC').all();
+      assert.equal(migrations.length, 2);
       assert.equal(migrations[0].version, '001_initial_schema');
+      assert.equal(migrations[1].version, '002_harden_constraints');
     } finally {
       db.close();
     }
@@ -273,6 +274,71 @@ test('SQLite STRICT table and CHECK constraint integrity', async (t) => {
     }
   });
 
+  await t.test('enforces impossible calendar dates rejected directly by SQLite', () => {
+    const db = createDatabase(':memory:');
+    try {
+      initDatabase(db);
+      db.prepare("INSERT INTO students (id, full_name, monthly_fee, created_at) VALUES (1, 'Test', 500000, '2026-10-01T00:00:00Z')").run();
+
+      // Impossible days in month
+      assert.throws(
+        () => db.prepare('INSERT INTO payments (student_id, amount, payment_date, created_at) VALUES (?, ?, ?, ?)').run(1, 100, '2026-02-30', '2026-10-15T00:00:00Z'),
+        /CHECK constraint failed/
+      );
+      assert.throws(
+        () => db.prepare('INSERT INTO payments (student_id, amount, payment_date, created_at) VALUES (?, ?, ?, ?)').run(1, 100, '2026-04-31', '2026-10-15T00:00:00Z'),
+        /CHECK constraint failed/
+      );
+
+      // Non-leap year leap day
+      assert.throws(
+        () => db.prepare('INSERT INTO payments (student_id, amount, payment_date, created_at) VALUES (?, ?, ?, ?)').run(1, 100, '2023-02-29', '2026-10-15T00:00:00Z'),
+        /CHECK constraint failed/
+      );
+      assert.throws(
+        () => db.prepare('INSERT INTO payments (student_id, amount, payment_date, created_at) VALUES (?, ?, ?, ?)').run(1, 100, '1900-02-29', '2026-10-15T00:00:00Z'),
+        /CHECK constraint failed/
+      );
+
+      // Valid leap days allowed
+      assert.doesNotThrow(
+        () => db.prepare('INSERT INTO payments (student_id, amount, payment_date, created_at) VALUES (?, ?, ?, ?)').run(1, 100, '2024-02-29', '2026-10-15T00:00:00Z')
+      );
+      assert.doesNotThrow(
+        () => db.prepare('INSERT INTO payments (student_id, amount, payment_date, created_at) VALUES (?, ?, ?, ?)').run(1, 100, '2000-02-29', '2026-10-15T00:00:00Z')
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  await t.test('enforces safe integer upper bound in SQLite schema', () => {
+    const db = createDatabase(':memory:');
+    try {
+      initDatabase(db);
+
+      // Maximum safe integer is allowed
+      assert.doesNotThrow(
+        () => db.prepare('INSERT INTO students (id, full_name, monthly_fee, created_at) VALUES (?, ?, ?, ?)').run(1, 'Rich', 9007199254740991, '2026-10-01T00:00:00Z')
+      );
+      assert.doesNotThrow(
+        () => db.prepare('INSERT INTO payments (student_id, amount, payment_date, created_at) VALUES (?, ?, ?, ?)').run(1, 9007199254740991, '2026-10-15', '2026-10-15T00:00:00Z')
+      );
+
+      // Beyond MAX_SAFE_INTEGER is rejected by CHECK constraint
+      assert.throws(
+        () => db.prepare('INSERT INTO students (full_name, monthly_fee, created_at) VALUES (?, ?, ?)').run('Overflow', BigInt('10000000000000000'), '2026-10-01T00:00:00Z'),
+        /CHECK constraint failed/
+      );
+      assert.throws(
+        () => db.prepare('INSERT INTO payments (student_id, amount, payment_date, created_at) VALUES (?, ?, ?, ?)').run(1, BigInt('10000000000000000'), '2026-10-15', '2026-10-15T00:00:00Z'),
+        /CHECK constraint failed/
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   await t.test('index idx_payments_student_date_id exists', () => {
     const db = createDatabase(':memory:');
     try {
@@ -280,6 +346,96 @@ test('SQLite STRICT table and CHECK constraint integrity', async (t) => {
       const indexList = db.prepare("PRAGMA index_list('payments')").all();
       const hasIndex = indexList.some((idx) => idx.name === 'idx_payments_student_date_id');
       assert.ok(hasIndex, 'Index idx_payments_student_date_id must exist on payments table');
+    } finally {
+      db.close();
+    }
+  });
+});
+
+test('Migration safety and transaction rollback', async (t) => {
+  await t.test('transactional migration rollback prevents partially applied schema on failure', () => {
+    const db = createDatabase(':memory:');
+    try {
+      initDatabase(db);
+
+      // Simulate a custom failing migration
+      const failingMigration = {
+        version: '999_failing_migration',
+        up(dbInstance) {
+          dbInstance.exec('CREATE TABLE should_be_rolled_back (id INTEGER PRIMARY KEY);');
+          throw new Error('Simulated failure during migration');
+        }
+      };
+
+      const getApplied = db.prepare('SELECT version FROM schema_migrations');
+      const insertMigration = db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)');
+
+      assert.throws(() => {
+        const runTx = db.transaction(() => {
+          failingMigration.up(db);
+          insertMigration.run(failingMigration.version, new Date().toISOString());
+        });
+        runTx();
+      }, /Simulated failure/);
+
+      // Verify table was not created and migration was not recorded
+      const tableExists = db.prepare("SELECT count(*) as c FROM sqlite_master WHERE type='table' AND name='should_be_rolled_back'").get().c;
+      assert.equal(tableExists, 0, 'Table must be rolled back on migration failure');
+
+      const migrationExists = db.prepare("SELECT count(*) as c FROM schema_migrations WHERE version='999_failing_migration'").get().c;
+      assert.equal(migrationExists, 0, 'Failed migration must not be recorded in schema_migrations');
+    } finally {
+      db.close();
+    }
+  });
+
+  await t.test('smoothly upgrades an existing database that was on unhardened schema', () => {
+    const db = createDatabase(':memory:');
+    try {
+      db.pragma('foreign_keys = ON');
+
+      // Set up legacy schema without date(payment_date) check
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          version TEXT NOT NULL UNIQUE,
+          applied_at TEXT NOT NULL
+        ) STRICT;
+        INSERT INTO schema_migrations (version, applied_at) VALUES ('001_initial_schema', '2026-10-01T00:00:00.000Z');
+
+        CREATE TABLE students (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          full_name TEXT NOT NULL CHECK (length(trim(full_name)) > 0),
+          monthly_fee INTEGER NOT NULL CHECK (monthly_fee >= 0),
+          created_at TEXT NOT NULL
+        ) STRICT;
+
+        CREATE TABLE payments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
+          amount INTEGER NOT NULL CHECK (amount > 0),
+          payment_date TEXT NOT NULL CHECK (payment_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+          created_at TEXT NOT NULL
+        ) STRICT;
+      `);
+
+      db.prepare("INSERT INTO students (id, full_name, monthly_fee, created_at) VALUES (1, 'Legacy Student', 500000, '2026-10-01T00:00:00Z')").run();
+      db.prepare("INSERT INTO payments (id, student_id, amount, payment_date, created_at) VALUES (1, 1, 250000, '2026-10-15', '2026-10-15T00:00:00Z')").run();
+
+      // Now run initDatabase which will apply migration 002
+      initDatabase(db);
+
+      // Verify records preserved
+      const student = db.prepare('SELECT * FROM students WHERE id = 1').get();
+      assert.equal(student.full_name, 'Legacy Student');
+      const payment = db.prepare('SELECT * FROM payments WHERE id = 1').get();
+      assert.equal(payment.amount, 250000);
+
+      // Verify hardened date check is now active on payments
+      assert.throws(
+        () => db.prepare("INSERT INTO payments (student_id, amount, payment_date, created_at) VALUES (1, 100, '2026-02-30', '2026-10-15T00:00:00Z')").run(),
+        /CHECK constraint failed/
+      );
     } finally {
       db.close();
     }

@@ -55,5 +55,15 @@ export function getMonthlyDebtors(db, reportMonth) {
   const { startOfMonth, startOfNextMonth } = getMonthDateRange(validMonth);
 
   const stmt = db.prepare(MONTHLY_DEBTORS_QUERY);
-  return stmt.all(startOfMonth, startOfNextMonth);
+  const rows = stmt.all(startOfMonth, startOfNextMonth);
+
+  for (const row of rows) {
+    if (!Number.isSafeInteger(row.total_paid) || !Number.isSafeInteger(row.debt)) {
+      throw new RangeError(
+        `Financial calculation overflow detected for student ID ${row.student_id}. Amount exceeds safe integer limits.`
+      );
+    }
+  }
+
+  return rows;
 }
