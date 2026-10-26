@@ -1,15 +1,21 @@
 /**
  * Express application factory for Project Pay.
- * Configures middleware, API routes, 404 fallback, and secure error handling.
+ * Configures middleware, API routes, static frontend serving, 404 fallback, and secure error handling.
  */
 
 import express from 'express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import { createDatabase } from './db/connection.js';
 import { initDatabase } from './db/init.js';
 import { createStudentRouter } from './routes/students.js';
 import { createPaymentRouter } from './routes/payments.js';
 import { createReportRouter } from './routes/reports.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const publicDir = path.join(__dirname, '..', 'public');
 
 /**
  * Creates and configures the Express application.
@@ -36,8 +42,22 @@ export function createApp(database) {
   app.use('/api/payments', createPaymentRouter(db));
   app.use('/api/reports', createReportRouter(db));
 
-  // Consistent JSON 404 for unknown routes
+  // Serve frontend static assets (HTML, CSS, client ES Modules)
+  app.use(express.static(publicDir));
+
+  // Consistent JSON 404 for unknown /api routes
+  app.use('/api', (req, res) => {
+    res.status(404).json({
+      error: 'Not Found',
+      message: `Cannot ${req.method} ${req.originalUrl}`
+    });
+  });
+
+  // SPA Navigation fallback for non-API GET requests
   app.use((req, res) => {
+    if (req.method === 'GET' && !req.originalUrl.startsWith('/api')) {
+      return res.sendFile(path.join(publicDir, 'index.html'));
+    }
     res.status(404).json({
       error: 'Not Found',
       message: `Cannot ${req.method} ${req.originalUrl}`

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project Pay — Moliya va To'lovlar Tizimi</title>
+  <meta name="description" content="O'quv markazi ichki moliyaviy operatsiyalari va qarzdorlik hisobotlari boshqaruvi">
+  
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="css/variables.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+</head>
+<body>
+  <!-- Accessible Skip Link -->
+  <a href="#main-content" class="sr-only">Asosiy kontentga o'tish</a>
+
+  <div class="app-container">
+    <!-- Backdrop for Mobile Navigation -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+
+    <!-- Sidebar Navigation -->
+    <aside id="app-sidebar" class="app-sidebar" aria-label="Asosiy menyu">
+      <div class="sidebar-header">
+        <div class="brand-icon" aria-hidden="true">P</div>
+        <div>
+          <div class="brand-title">Project Pay</div>
+          <div class="brand-subtitle">Moliya tizimi</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a href="#/" class="nav-item active" id="nav-dashboard">
+          <span class="nav-icon" aria-hidden="true">📊</span>
+          <span>Bosh sahifa</span>
+        </a>
+        <a href="#/students" class="nav-item" id="nav-students">
+          <span class="nav-icon" aria-hidden="true">👥</span>
+          <span>O'quvchilar</span>
+        </a>
+        <a href="#/payments" class="nav-item" id="nav-payments">
+          <span class="nav-icon" aria-hidden="true">💳</span>
+          <span>To'lov kiritish</span>
+        </a>
+        <a href="#/debtors" class="nav-item" id="nav-debtors">
+          <span class="nav-icon" aria-hidden="true">📋</span>
+          <span>Qarzdorlar hisoboti</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div>O'quv markazi moliya nazorati</div>
+        <small style="color: var(--text-muted);">v1.0.0 · ES Modules</small>
+      </div>
+    </aside>
+
+    <!-- Main App Content Shell -->
+    <div class="app-main">
+      <!-- Top Application Header -->
+      <header class="app-header">
+        <button id="mobile-menu-btn" class="mobile-menu-btn" type="button" aria-label="Menyuni ochish">
+          ☰
+        </button>
+
+        <div class="header-status">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span>Tizim faol · Server aloqasi barqaror</span>
+        </div>
+      </header>
+
+      <!-- View Container (Populated by Router) -->
+      <main id="main-content" class="content-wrapper" tabindex="-1">
+        <!-- Views render here -->
+      </main>
+    </div>
+  </div>
+
+  <!-- Reusable Modal Container -->
+  <div id="modal-overlay" class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1"></div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <!-- Application Entry Point -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
