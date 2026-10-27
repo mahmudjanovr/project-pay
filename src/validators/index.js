@@ -81,6 +81,18 @@ export const reportMonthSchema = z.string({
   });
 
 /**
+ * Validates report year:
+ * - Must be a string or number.
+ * - Must match exact YYYY pattern (1900-2100).
+ */
+export const reportYearSchema = z.union([
+  z.string().regex(/^\d{4}$/, { message: 'Report year must be in exact YYYY format' }).transform((v) => parseInt(v, 10)),
+  z.number().refine((v) => Number.isSafeInteger(v), { message: 'Report year must be a safe integer' })
+]).refine((year) => year >= 1900 && year <= 2100, {
+  message: 'Report year must be between 1900 and 2100'
+});
+
+/**
  * Validates positive safe integer ID (e.g. student_id).
  */
 export const idSchema = z.number({
@@ -324,4 +336,14 @@ export function validatePaymentDate(date) {
  */
 export function validateReportMonth(month) {
   return reportMonthSchema.parse(month);
+}
+
+/**
+ * Validates a report year string or number.
+ *
+ * @param {unknown} year
+ * @returns {number}
+ */
+export function validateReportYear(year) {
+  return reportYearSchema.parse(year);
 }

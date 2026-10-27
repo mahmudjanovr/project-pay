@@ -38,6 +38,9 @@ async function request(url, options = {}) {
   try {
     response = await fetch(url, config);
   } catch (networkErr) {
+    if (networkErr && networkErr.name === 'AbortError') {
+      throw networkErr;
+    }
     throw new ApiError(
       'Serverga ulanishda xatolik yuz berdi. Internet aloqasini tekshiring.',
       0,
@@ -210,8 +213,13 @@ export async function fetchStudentPayments(studentId) {
 
 // Report API Calls
 
-export async function fetchMonthlyDebtors(month) {
+export async function fetchMonthlyDebtors(month, options = {}) {
   const query = encodeURIComponent(month);
-  return request(`/api/reports/debtors?month=${query}`);
+  return request(`/api/reports/debtors?month=${query}`, options);
+}
+
+export async function fetchAnnualReport(year, options = {}) {
+  const query = encodeURIComponent(year);
+  return request(`/api/reports/annual?year=${query}`, options);
 }
 

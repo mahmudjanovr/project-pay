@@ -31,6 +31,11 @@ function getContainer() {
 export function showToast(message, type = 'info', title = null) {
   const toastContainer = getContainer();
 
+  // Keep at most 3 active toasts so notifications do not occlude top actions or fill screen
+  while (toastContainer.children.length >= 3) {
+    toastContainer.removeChild(toastContainer.firstChild);
+  }
+
   const typeTitles = {
     success: 'Muvaffaqiyatli',
     error: 'Xatolik',

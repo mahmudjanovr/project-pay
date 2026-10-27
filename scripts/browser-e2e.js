@@ -13,6 +13,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
 import { startServer } from '../src/server.js';
@@ -316,7 +317,11 @@ export class FirefoxBiDi {
       });
     }
     if (this.profileDir) {
-      fs.rmSync(this.profileDir, { recursive: true, force: true });
+      try {
+        fs.rmSync(this.profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+      } catch (err) {
+        // Ignore residual locked files in temp profile on Windows exit
+      }
     }
   }
 }
@@ -347,6 +352,10 @@ async function runE2E() {
   let mainCtx = null;
   const ff = new FirefoxBiDi();
   const completedWorkflows = [];
+  const markPassed = (msg) => {
+    completedWorkflows.push(msg);
+    console.log(`[PASS] ${msg}`);
+  };
 
   try {
     await ff.launch();
@@ -382,7 +391,7 @@ async function runE2E() {
     await new Promise((r) => emptyCtx.server.close(r));
     emptyCtx.db.close();
     emptyCtx = null;
-    completedWorkflows.push('Workflow 7: Empty-state workflows across Dashboard, Students, Groups, Payments, Debtors');
+    markPassed('Workflow 7: Empty-state workflows across Dashboard, Students, Groups, Payments, Debtors');
 
     // ========================================================================
     // Workflow 1: Create groups, create students, assign/edit, verify in all views
@@ -393,6 +402,7 @@ async function runE2E() {
 
     for (const groupName of ['Frontend React', 'Backend Node', 'Archive Empty']) {
       await ff.clickSelector('.page-actions .btn-primary');
+
       await ff.waitForModalOpen();
       await ff.fillInput('#add-group-name', groupName);
       await ff.clickSelector('#modal-overlay button[type="submit"]');
@@ -466,7 +476,7 @@ async function runE2E() {
     await ff.clickSelector('a[href="#/groups/1"]');
     await ff.waitFor(`document.querySelector('.page-title')?.textContent === 'Frontend React'`);
     assert.equal(await ff.eval(`document.getElementById('main-content')?.textContent.includes('Malika Karimova')`), true);
-    completedWorkflows.push('Workflow 1: Group & Student creation, assignment, editing, and cross-view consistency');
+    markPassed('Workflow 1: Group & Student creation, assignment, editing, and cross-view consistency');
 
     // ========================================================================
     // Workflow 2: Record multiple payments, verify label associations & history
@@ -512,7 +522,7 @@ async function runE2E() {
     const malikaHistoryRows = await ff.eval(`document.querySelectorAll('.data-table tbody tr').length`);
     assert.equal(malikaHistoryRows, 2);
     assert.equal(await ff.eval(`document.getElementById('main-content')?.textContent.includes('2 ta')`), true);
-    completedWorkflows.push('Workflow 2: Multiple payments recorded and verified in student payment history');
+    markPassed('Workflow 2: Multiple payments recorded and verified in student payment history');
 
     // ========================================================================
     // Workflow 3: Monthly debtor report & independent verification vs API & Dashboard
@@ -538,7 +548,7 @@ async function runE2E() {
     );
     assert.equal(dashStats[0], '3');
     assert.equal(dashStats[1], '1 nafar');
-    completedWorkflows.push('Workflow 3: Monthly debtor report verified against API and Dashboard');
+    markPassed('Workflow 3: Monthly debtor report verified against API and Dashboard');
 
     // ========================================================================
     // Workflow 4: Invalid form submissions & zero unwanted DB changes
@@ -592,7 +602,7 @@ async function runE2E() {
       payments: mainCtx.db.prepare('SELECT COUNT(*) AS c FROM payments').get().c
     };
     assert.deepEqual(countsAfterInvalid, countsBeforeInvalid, 'Invalid forms must not mutate DB');
-    completedWorkflows.push('Workflow 4: Invalid submissions blocked with Uzbek errors and zero DB mutations');
+    markPassed('Workflow 4: Invalid submissions blocked with Uzbek errors and zero DB mutations');
 
     // ========================================================================
     // Workflow 5: Referential integrity (ON DELETE RESTRICT) & safe empty deletion
@@ -641,7 +651,7 @@ async function runE2E() {
     );
     await ff.pressKey('Escape');
     await ff.waitForModalClosed();
-    completedWorkflows.push('Workflow 5: ON DELETE RESTRICT referential integrity enforced in UI & DB');
+    markPassed('Workflow 5: ON DELETE RESTRICT referential integrity enforced in UI & DB');
 
     // ========================================================================
     // Workflow 6: Direct nested SPA URL, page reload & full server restart persistence
@@ -661,7 +671,7 @@ async function runE2E() {
     await ff.navigate(`${mainCtx.baseUrl}/#/students/1`);
     await ff.waitFor(`document.querySelector('.page-title')?.textContent === 'Malika Karimova'`);
     assert.equal(await ff.eval(`document.querySelectorAll('.data-table tbody tr').length`), 2);
-    completedWorkflows.push('Workflow 6: Direct nested URL, reload, and full server restart persistence verified');
+    markPassed('Workflow 6: Direct nested URL, reload, and full server restart persistence verified');
 
     // ========================================================================
     // Workflow 8: Rapid clicks, XSS safe rendering & responsive viewports
@@ -720,7 +730,7 @@ async function runE2E() {
       0,
       `Unexpected static asset/network failures: ${JSON.stringify(ff.networkFailures)}`
     );
-    completedWorkflows.push('Workflow 8: Rapid-click protection, XSS safety, responsive viewports & 0 console/network errors');
+    markPassed('Workflow 8: Rapid-click protection, XSS safety, responsive viewports & 0 console/network errors');
 
     // ========================================================================
     // Workflow 9: Persistent Section Headers, Controls UX & Responsive Scrolling
@@ -977,10 +987,13 @@ async function runE2E() {
     assert.ok(debtorScrolled.thTop >= debtorScrolled.topBottom - 1);
     assert.equal(debtorScrolled.paginationBottom, debtorScrolled.bodyBottom, 'Pagination bar must sit flush at bottom:0 with no row bleed');
 
-    // Post-scroll Month Change: change month while scrolled -> reloads and resets scroll to 0
+    // Post-scroll Month Change: changing month must NOT unexpectedly reset the scroll position
+    const preScrollTop = await ff.eval(`document.querySelector('.page-shell-body').scrollTop`);
+    assert.ok(preScrollTop > 0, 'Pre-scroll position should be positive');
     await ff.fillInput('#debtor-month-input', '2025-10');
     await ff.waitFor(`document.getElementById('report-month-label')?.textContent.includes('2025')`);
-    assert.equal(await ff.eval(`document.querySelector('.page-shell-body').scrollTop`), 0);
+    const postScrollTop = await ff.eval(`document.querySelector('.page-shell-body').scrollTop`);
+    assert.equal(postScrollTop, preScrollTop, 'Scroll position must be preserved across month changes without jumping to 0');
     await ff.fillInput('#debtor-month-input', currentMonth);
     await ff.waitFor(`document.querySelectorAll('#report-content .data-table tbody tr').length === 100`);
 
@@ -1062,11 +1075,207 @@ async function runE2E() {
 
     await ff.setViewport(1280, 800);
     await ff.waitFor(`window.innerWidth === 1280 && document.getElementById('app-sidebar').getBoundingClientRect().left === 0`);
-    completedWorkflows.push('Workflow 9: Persistent Section Headers, Controls UX & Responsive Scrolling');
+    markPassed('Workflow 9: Persistent Section Headers, Controls UX & Responsive Scrolling');
 
-    for (const line of completedWorkflows) {
-      console.log(`[PASS] ${line}`);
+    // ========================================================================
+    // Workflow 10: Groups & Debtors Layout Stability, Month Switching & Annual Reporting UX
+    // ========================================================================
+    await ff.setViewport(1280, 800);
+
+    // 1. Groups Statistics Layout & Spacing Verification
+    await ff.navigate(`${mainCtx.baseUrl}/#/groups`);
+    await ff.waitFor(`document.querySelector('.page-title')?.textContent === 'Guruhlar'`);
+    await ff.waitFor(`document.querySelector('.stats-grid') !== null`);
+
+    const groupsLayoutInitial = await ff.eval(`(() => {
+      const topShell = document.querySelector('.page-shell-top');
+      const stats = document.querySelector('.stats-grid');
+      const topR = topShell.getBoundingClientRect();
+      const statsR = stats.getBoundingClientRect();
+      const cards = Array.from(stats.querySelectorAll('.stat-card')).map((c) => {
+        const r = c.getBoundingClientRect();
+        return { top: Math.round(r.top), bottom: Math.round(r.bottom), width: Math.round(r.width), height: Math.round(r.height) };
+      });
+      return {
+        topBottom: Math.round(topR.bottom),
+        statsTop: Math.round(statsR.top),
+        gap: Math.round(statsR.top - topR.bottom),
+        cards
+      };
+    })()`);
+
+    assert.ok(groupsLayoutInitial.gap >= 16, `Groups stats gap must be >= 16px, got ${groupsLayoutInitial.gap}px`);
+    assert.ok(groupsLayoutInitial.statsTop >= groupsLayoutInitial.topBottom, 'Groups stats must never overlap top shell');
+    assert.equal(groupsLayoutInitial.cards.length, 2);
+
+    // Create a new group and verify in-place stat stability without layout shift
+    await ff.clickSelector('.page-actions .btn-primary');
+    await ff.waitForModalOpen();
+    await ff.fillInput('#add-group-name', 'Layout Verification Group');
+    await ff.clickSelector('#modal-overlay button[type="submit"]');
+    await ff.waitForModalClosed();
+    await ff.waitFor(`document.getElementById('main-content')?.textContent.includes('Layout Verification Group')`);
+
+    const groupsLayoutAfterCreate = await ff.eval(`(() => {
+      const topShell = document.querySelector('.page-shell-top');
+      const stats = document.querySelector('.stats-grid');
+      const topR = topShell.getBoundingClientRect();
+      const statsR = stats.getBoundingClientRect();
+      return {
+        topBottom: Math.round(topR.bottom),
+        statsTop: Math.round(statsR.top),
+        gap: Math.round(statsR.top - topR.bottom)
+      };
+    })()`);
+    assert.ok(groupsLayoutAfterCreate.gap >= 16);
+    assert.ok(groupsLayoutAfterCreate.statsTop >= groupsLayoutAfterCreate.topBottom);
+
+    // 2. Debtors Statistics Layout & Month Switching Verification
+    await ff.navigate(`${mainCtx.baseUrl}/#/debtors`);
+    await ff.waitFor(`document.querySelector('.page-title')?.textContent === 'Qarzdorlar hisoboti'`);
+    await ff.waitFor(`document.querySelector('.stats-grid') !== null`);
+
+    const debtorsLayoutInitial = await ff.eval(`(() => {
+      const topShell = document.querySelector('.page-shell-top');
+      const stats = document.querySelector('.stats-grid');
+      const topR = topShell.getBoundingClientRect();
+      const statsR = stats.getBoundingClientRect();
+      return {
+        topBottom: Math.round(topR.bottom),
+        statsTop: Math.round(statsR.top),
+        gap: Math.round(statsR.top - topR.bottom)
+      };
+    })()`);
+    assert.ok(debtorsLayoutInitial.gap >= 16, `Debtors stats gap must be >= 16px, got ${debtorsLayoutInitial.gap}px`);
+    assert.ok(debtorsLayoutInitial.statsTop >= debtorsLayoutInitial.topBottom);
+
+    // Month switching: change October -> September -> December without clicking elsewhere
+    await ff.fillInput('#debtor-month-input', '2026-09');
+    await ff.waitFor(`document.getElementById('report-month-label')?.textContent.includes('Sentabr')`);
+    await ff.waitFor(`window.location.hash.includes('month=2026-09')`);
+    const sepDebtorStats = await ff.eval(`(() => {
+      const vals = Array.from(document.querySelectorAll('.stats-grid .stat-value')).map((v) => v.textContent.trim());
+      return { count: vals[0], totalDebt: vals[1], paid: vals[2], hash: window.location.hash };
+    })()`);
+    assert.ok(sepDebtorStats.count, 'September debtors count must be present');
+    assert.ok(sepDebtorStats.hash.includes('2026-09'), 'URL hash must reflect 2026-09');
+
+    await ff.fillInput('#debtor-month-input', '2026-12');
+    await ff.waitFor(`document.getElementById('report-month-label')?.textContent.includes('Dekabr')`);
+    await ff.waitFor(`window.location.hash.includes('month=2026-12')`);
+    const decDebtorStats = await ff.eval(`(() => {
+      const vals = Array.from(document.querySelectorAll('.stats-grid .stat-value')).map((v) => v.textContent.trim());
+      return { count: vals[0], totalDebt: vals[1], paid: vals[2], hash: window.location.hash };
+    })()`);
+    assert.ok(decDebtorStats.count, 'December debtors count must be present');
+    assert.ok(decDebtorStats.hash.includes('2026-12'), 'URL hash must reflect 2026-12');
+
+    // Rapid-fire month switching: latest selection must win
+    await ff.eval(`(() => {
+      const inp = document.getElementById('debtor-month-input');
+      for (const m of ['2026-09', '2026-10', '2026-11', '2026-12']) {
+        inp.value = m;
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    })()`);
+    await ff.waitFor(`document.getElementById('report-month-label')?.textContent.includes('Dekabr')`);
+    await ff.waitFor(`window.location.hash.includes('month=2026-12')`);
+    assert.equal(await ff.eval(`document.getElementById('debtor-month-input')?.value`), '2026-12');
+
+    // Reload persistence: reloading preserving selected month and figures
+    await ff.reload();
+    await ff.waitFor(`document.querySelector('.page-title')?.textContent === 'Qarzdorlar hisoboti'`);
+    await ff.waitFor(`document.getElementById('debtor-month-input') !== null`);
+    await ff.waitFor(`document.getElementById('report-month-label')?.textContent.includes('Dekabr')`);
+    assert.equal(await ff.eval(`document.getElementById('debtor-month-input')?.value`), '2026-12');
+    assert.ok((await ff.eval(`window.location.hash`)).includes('month=2026-12'));
+
+    // Scroll preservation across month switching without layout jump
+    await ff.eval(`document.querySelector('.page-shell-body').scrollTop = 150`);
+    const preSwitchScroll = await ff.eval(`document.querySelector('.page-shell-body').scrollTop`);
+    assert.ok(preSwitchScroll >= 100, 'Page shell body should be scrolled');
+    await ff.fillInput('#debtor-month-input', currentMonth);
+    await ff.waitFor(`document.getElementById('report-month-label')?.textContent.includes(${JSON.stringify(currentMonth.slice(0, 4))})`);
+    const postSwitchScroll = await ff.eval(`document.querySelector('.page-shell-body').scrollTop`);
+    assert.equal(postSwitchScroll, preSwitchScroll, 'Scroll position must be preserved across month changes without resetting to 0');
+    await ff.eval(`document.querySelector('.page-shell-body').scrollTop = 0`);
+    await new Promise((r) => setTimeout(r, 50));
+
+    // 3. Switch between Monthly and Annual reports
+    await ff.clickSelector('.view-switch button:last-child'); // Yillik hisobot
+    await ff.waitFor(`document.getElementById('annual-year-select') !== null`);
+    await ff.waitFor(`document.querySelectorAll('.data-table tbody tr').length === 12`);
+
+    const annualInitial = await ff.eval(`(() => {
+      const topShell = document.querySelector('.page-shell-top');
+      const stats = document.querySelector('.stats-grid');
+      const topR = topShell.getBoundingClientRect();
+      const statsR = stats.getBoundingClientRect();
+      const rows = document.querySelectorAll('.data-table tbody tr');
+      const btns = document.querySelectorAll('.view-switch-btn');
+      return {
+        topBottom: Math.round(topR.bottom),
+        statsTop: Math.round(statsR.top),
+        gap: Math.round(statsR.top - topR.bottom),
+        rowCount: rows.length,
+        isAnnualActive: btns[1].classList.contains('active')
+      };
+    })()`);
+    assert.equal(annualInitial.isAnnualActive, true);
+    assert.equal(annualInitial.rowCount, 12, 'Annual report must render all 12 calendar months');
+    assert.ok(annualInitial.gap >= 16);
+
+    // Change year in annual report
+    await ff.fillInput('#annual-year-select', '2025');
+    await ff.waitFor(`document.getElementById('report-month-label')?.textContent.includes('2025')`);
+    await ff.waitFor(`document.querySelectorAll('.data-table tbody tr').length === 12`);
+    assert.equal(await ff.eval(`document.querySelectorAll('.data-table tbody tr').length`), 12);
+
+    // Switch back to Monthly report via table action button
+    await ff.eval(`(() => {
+      const btn = document.querySelector('.data-table tbody tr button');
+      if (btn) btn.click();
+    })()`);
+    await ff.waitFor(`document.getElementById('debtor-month-input') !== null`);
+    assert.equal(await ff.eval(`document.querySelectorAll('.view-switch-btn')[0].classList.contains('active')`), true);
+
+    // 4. Responsive Viewports: Medium (850), Tablet (700) and Mobile (375)
+    for (const [vw, vh] of [[850, 800], [700, 900], [375, 812]]) {
+      await ff.setViewport(vw, vh);
+      await ff.navigate(`${mainCtx.baseUrl}/#/groups`);
+      await ff.waitFor(`document.querySelector('.page-title')?.textContent === 'Guruhlar'`);
+      await ff.waitFor(`document.querySelector('.stats-grid') !== null`);
+      const gResp = await ff.eval(`(() => {
+        const topR = document.querySelector('.page-shell-top').getBoundingClientRect();
+        const statsR = document.querySelector('.stats-grid').getBoundingClientRect();
+        return {
+          gap: Math.round(statsR.top - topR.bottom),
+          noOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth
+        };
+      })()`);
+      assert.ok(gResp.gap >= 12, `Viewport ${vw}px Groups stats gap must be >= 12px, got ${gResp.gap}`);
+      assert.equal(gResp.noOverflow, true, `Viewport ${vw}px must not have horizontal overflow`);
+
+      await ff.navigate(`${mainCtx.baseUrl}/#/debtors`);
+      await ff.waitFor(`document.querySelector('.page-title')?.textContent === 'Qarzdorlar hisoboti'`);
+      await ff.waitFor(`document.querySelector('#debtor-month-input') !== null`);
+      await ff.waitFor(`document.querySelector('.stats-grid') !== null`);
+      const dResp = await ff.eval(`(() => {
+        const topR = document.querySelector('.page-shell-top').getBoundingClientRect();
+        const statsR = document.querySelector('.stats-grid').getBoundingClientRect();
+        return {
+          gap: Math.round(statsR.top - topR.bottom),
+          noOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth
+        };
+      })()`);
+      assert.ok(dResp.gap >= 12, `Viewport ${vw}px Debtors stats gap must be >= 12px, got ${dResp.gap}`);
+      assert.equal(dResp.noOverflow, true, `Viewport ${vw}px must not have horizontal overflow`);
     }
+
+    await ff.setViewport(1280, 800);
+    markPassed('Workflow 10: Groups & Debtors Layout Stability, Month Switching & Annual Reporting UX');
+
     console.log('All real-browser Firefox WebDriver BiDi E2E workflows passed.');
   } finally {
     await ff.close();
@@ -1078,11 +1287,13 @@ async function runE2E() {
       await new Promise((r) => mainCtx.server.close(r));
       mainCtx.db.close();
     }
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+    } catch {}
   }
 }
 
-const isDirect = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname);
+const isDirect = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 if (isDirect) {
   runE2E().catch((err) => {
     console.error('E2E Browser Suite Failed:', err);

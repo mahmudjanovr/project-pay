@@ -4,7 +4,8 @@
 
 import { Router } from 'express';
 import { getMonthlyDebtors } from '../services/debtors.js';
-import { validateReportMonth } from '../validators/index.js';
+import { getAnnualReport } from '../services/reports.js';
+import { validateReportMonth, validateReportYear } from '../validators/index.js';
 
 /**
  * Creates a request handler for monthly debtor reports.
@@ -26,7 +27,35 @@ export function createDebtorsHandler(db) {
 
       const validMonth = validateReportMonth(monthParam);
       const debtors = getMonthlyDebtors(db, validMonth);
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       res.status(200).json(debtors);
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+/**
+ * Creates a request handler for annual reports.
+ *
+ * @param {import('better-sqlite3').Database} db
+ * @returns {import('express').RequestHandler}
+ */
+export function createAnnualReportHandler(db) {
+  return (req, res, next) => {
+    try {
+      const yearParam = req.query.year;
+      if (!yearParam || typeof yearParam !== 'string') {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: 'Query parameter "year" is required in YYYY format'
+        });
+      }
+
+      const validYear = validateReportYear(yearParam);
+      const report = getAnnualReport(db, validYear);
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.status(200).json(report);
     } catch (err) {
       next(err);
     }
@@ -44,6 +73,9 @@ export function createReportRouter(db) {
 
   // GET /api/reports/debtors?month=YYYY-MM
   router.get('/debtors', createDebtorsHandler(db));
+
+  // GET /api/reports/annual?year=YYYY
+  router.get('/annual', createAnnualReportHandler(db));
 
   return router;
 }

@@ -85,5 +85,73 @@ export const migrations = [
         db.exec('ALTER TABLE students ADD COLUMN phone TEXT;');
       }
     }
+  },
+  {
+    version: '005_billing_month_and_receipts',
+    up(db) {
+      // 1. Add billing_month, status, and confirmed_at to payments table
+      const paymentColumns = db.prepare('PRAGMA table_info(payments)').all();
+      const hasBillingMonth = paymentColumns.some((col) => col.name === 'billing_month');
+      if (!hasBillingMonth) {
+        db.exec('ALTER TABLE payments ADD COLUMN billing_month TEXT;');
+      }
+
+      const hasStatus = paymentColumns.some((col) => col.name === 'status');
+      if (!hasStatus) {
+        db.exec("ALTER TABLE payments ADD COLUMN status TEXT NOT NULL DEFAULT 'confirmed' CHECK (status IN ('pending', 'confirmed'));");
+      }
+
+      const hasConfirmedAt = paymentColumns.some((col) => col.name === 'confirmed_at');
+      if (!hasConfirmedAt) {
+        db.exec('ALTER TABLE payments ADD COLUMN confirmed_at TEXT;');
+      }
+
+      // Safe backward-compatible migration for existing payments without explicit billing_month
+      db.exec(`
+        UPDATE payments
+        SET billing_month = substr(payment_date, 1, 7)
+        WHERE billing_month IS NULL
+          AND payment_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]*';
+
+        UPDATE payments
+        SET confirmed_at = created_at
+        WHERE status = 'confirmed' AND confirmed_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_payments_billing_month_status ON payments (billing_month, status);
+        CREATE INDEX IF NOT EXISTS idx_payments_student_billing ON payments (student_id, billing_month, status);
+      `);
+
+      // 2. Add status and enrollment_date to students table
+      const studentColumns = db.prepare('PRAGMA table_info(students)').all();
+      const hasStudentStatus = studentColumns.some((col) => col.name === 'status');
+      if (!hasStudentStatus) {
+        db.exec("ALTER TABLE students ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'exempt'));");
+      }
+
+      const hasEnrollmentDate = studentColumns.some((col) => col.name === 'enrollment_date');
+      if (!hasEnrollmentDate) {
+        db.exec('ALTER TABLE students ADD COLUMN enrollment_date TEXT;');
+      }
+
+      // 3. Create persistent receipts table
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS receipts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          receipt_number TEXT NOT NULL UNIQUE CHECK (length(trim(receipt_number)) > 0),
+          payment_id INTEGER NOT NULL UNIQUE REFERENCES payments(id) ON DELETE RESTRICT,
+          student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
+          amount INTEGER NOT NULL CHECK (amount > 0 AND amount <= 9007199254740991),
+          billing_month TEXT NOT NULL CHECK (billing_month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]' AND substr(billing_month, 6, 2) BETWEEN '01' AND '12'),
+          payment_date TEXT NOT NULL CHECK (payment_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' AND date(payment_date) = payment_date),
+          confirmed_at TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        ) STRICT;
+
+        CREATE INDEX IF NOT EXISTS idx_receipts_student_id ON receipts (student_id);
+        CREATE INDEX IF NOT EXISTS idx_receipts_payment_id ON receipts (payment_id);
+        CREATE INDEX IF NOT EXISTS idx_receipts_receipt_number ON receipts (receipt_number);
+        CREATE INDEX IF NOT EXISTS idx_receipts_billing_month ON receipts (billing_month);
+      `);
+    }
   }
 ];

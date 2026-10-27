@@ -17,151 +17,177 @@ import { createPageShell, renderStateView } from '../pageLayout.js';
  * @param {URLSearchParams} [queryParams]
  */
 export async function renderGroups(container, queryParams = new URLSearchParams()) {
-  const loadingEl = el('div', { className: 'loading-indicator' },
-    el('div', { className: 'spinner' }),
-    el('p', {}, 'Guruhlar ro\'yxati yuklanmoqda...')
+  clearElement(container);
+
+  const groupCountVal = el('div', { className: 'stat-value' }, '—');
+  const studentCountVal = el('div', { className: 'stat-value' }, '—');
+
+  // Page Header
+  const pageHeader = el('div', { className: 'page-header' },
+    el('div', {},
+      el('h1', { className: 'page-title' }, 'Guruhlar'),
+      el('p', { className: 'page-description' }, 'O\'quv markazidagi barcha guruhlar va ulardagi o\'quvchilar soni')
+    ),
+    el('div', { className: 'page-actions' },
+      el('button', {
+        type: 'button',
+        className: 'btn btn-primary',
+        onClick: () => showAddGroupModal(() => refreshData())
+      }, '+ Yangi guruh ochish')
+    )
   );
-  renderStateView(container, loadingEl);
 
-  try {
-    const groups = await fetchGroups();
-    clearElement(container);
+  // Summary Stat Cards
+  const statsGrid = el('div', { className: 'stats-grid' },
+    el('div', { className: 'stat-card' },
+      el('span', { className: 'stat-label' }, 'Jami guruhlar'),
+      groupCountVal,
+      el('span', { className: 'stat-desc' }, 'Faol o\'quv guruhlari soni')
+    ),
+    el('div', { className: 'stat-card accent-green' },
+      el('span', { className: 'stat-label' }, 'Biriktirilgan o\'quvchilar'),
+      studentCountVal,
+      el('span', { className: 'stat-desc' }, 'Guruhlarga taqsimlangan barcha o\'quvchilar')
+    )
+  );
 
-    // Calculate total assigned students across all groups
-    const totalAssignedStudents = groups.reduce((sum, g) => sum + (g.student_count || 0), 0);
+  const contentCard = el('div', { className: 'card' });
 
-    // Page Header
-    const pageHeader = el('div', { className: 'page-header' },
-      el('div', {},
-        el('h1', { className: 'page-title' }, 'Guruhlar'),
-        el('p', { className: 'page-description' }, 'O\'quv markazidagi barcha guruhlar va ulardagi o\'quvchilar soni')
-      ),
-      el('div', { className: 'page-actions' },
-        el('button', {
-          type: 'button',
-          className: 'btn btn-primary',
-          onClick: () => showAddGroupModal(() => renderGroups(container))
-        }, '+ Yangi guruh ochish')
-      )
-    );
+  const shell = createPageShell({
+    header: pageHeader,
+    body: [statsGrid, contentCard]
+  });
+  container.appendChild(shell.element);
 
-    // Summary Stat Cards
-    const statsGrid = el('div', { className: 'stats-grid', style: 'margin-bottom: var(--space-6);' },
-      el('div', { className: 'stat-card' },
-        el('span', { className: 'stat-label' }, 'Jami guruhlar'),
-        el('div', { className: 'stat-value' }, `${groups.length} ta`),
-        el('span', { className: 'stat-desc' }, 'Faol o\'quv guruhlari soni')
-      ),
-      el('div', { className: 'stat-card accent-green' },
-        el('span', { className: 'stat-label' }, 'Biriktirilgan o\'quvchilar'),
-        el('div', { className: 'stat-value' }, `${totalAssignedStudents} nafar`),
-        el('span', { className: 'stat-desc' }, 'Guruhlarga taqsimlangan barcha o\'quvchilar')
-      )
-    );
+  let isFirstLoad = true;
 
-    const contentCard = el('div', { className: groups.length > 0 ? 'card card-table' : 'card' });
-
-    if (groups.length === 0) {
+  async function refreshData() {
+    if (isFirstLoad) {
+      clearElement(contentCard);
+      contentCard.className = 'card';
       contentCard.appendChild(
-        el('div', { className: 'empty-state' },
-          el('div', { className: 'empty-state-icon' }, '📁'),
-          el('h3', { className: 'empty-state-title' }, 'Hozircha guruhlar mavjud emas'),
-          el('p', { className: 'empty-state-description' }, 'O\'quvchilarni guruhlarga ajratish va boshqarish uchun yangi guruh yarating.'),
-          el('button', {
-            type: 'button',
-            className: 'btn btn-primary btn-sm',
-            onClick: () => showAddGroupModal(() => renderGroups(container))
-          }, '+ Guruh yaratish')
+        el('div', { className: 'loading-indicator', style: 'min-height: 240px; display: flex; flex-direction: column; align-items: center; justify-content: center;' },
+          el('div', { className: 'spinner' }),
+          el('p', {}, 'Guruhlar ro\'yxati yuklanmoqda...')
         )
       );
     } else {
-      const tbody = el('tbody', {},
-        ...groups.map((group) =>
-          el('tr', {
-            style: 'cursor: pointer;',
-            onClick: (e) => {
-              if (e.target.closest('button') || e.target.closest('a')) return;
-              window.location.hash = `#/groups/${group.id}`;
-            }
-          },
-            el('td', { style: 'font-weight: 600;' },
-              el('a', {
-                href: `#/groups/${group.id}`,
-                style: 'color: var(--text-primary); text-decoration: none;',
-                title: `${group.name} tafsilotlarini ko'rish`
-              }, group.name)
-            ),
-            el('td', { className: 'col-numeric' },
-              el('span', {
-                className: group.student_count > 0 ? 'badge-group' : '',
-                style: group.student_count > 0 ? 'color: var(--accent-primary); font-weight: 600;' : 'color: var(--text-muted);'
-              }, `${group.student_count} nafar`)
-            ),
-            el('td', { style: 'color: var(--text-muted); font-size: 0.8125rem;' }, formatDate(group.created_at)),
-            el('td', { className: 'col-actions' },
-              el('div', { style: 'display: flex; gap: var(--space-2); justify-content: flex-end;' },
+      contentCard.style.opacity = '0.7';
+    }
+
+    try {
+      const groups = await fetchGroups();
+      contentCard.style.opacity = '1';
+      clearElement(contentCard);
+      isFirstLoad = false;
+
+      const totalAssignedStudents = groups.reduce((sum, g) => sum + (g.student_count || 0), 0);
+      groupCountVal.textContent = `${groups.length} ta`;
+      studentCountVal.textContent = `${totalAssignedStudents} nafar`;
+
+      if (groups.length === 0) {
+        contentCard.className = 'card';
+        contentCard.appendChild(
+          el('div', { className: 'empty-state' },
+            el('div', { className: 'empty-state-icon' }, '📁'),
+            el('h3', { className: 'empty-state-title' }, 'Hozircha guruhlar mavjud emas'),
+            el('p', { className: 'empty-state-description' }, 'O\'quvchilarni guruhlarga ajratish va boshqarish uchun yangi guruh yarating.'),
+            el('button', {
+              type: 'button',
+              className: 'btn btn-primary btn-sm',
+              onClick: () => showAddGroupModal(() => refreshData())
+            }, '+ Guruh yaratish')
+          )
+        );
+      } else {
+        contentCard.className = 'card card-table';
+
+        const tbody = el('tbody', {},
+          ...groups.map((group) =>
+            el('tr', {
+              style: 'cursor: pointer;',
+              onClick: (e) => {
+                if (e.target.closest('button') || e.target.closest('a')) return;
+                window.location.hash = `#/groups/${group.id}`;
+              }
+            },
+              el('td', { style: 'font-weight: 600;' },
                 el('a', {
                   href: `#/groups/${group.id}`,
-                  className: 'btn btn-secondary btn-sm',
-                  title: 'Guruh o\'quvchilarini ko\'rish'
-                }, 'O\'quvchilar'),
-                el('button', {
-                  type: 'button',
-                  className: 'btn btn-secondary btn-sm',
-                  title: 'Guruh nomini tahrirlash',
-                  onClick: () => showEditGroupModal(group, () => renderGroups(container))
-                }, 'Tahrirlash'),
-                el('button', {
-                  type: 'button',
-                  className: 'btn btn-danger-outline btn-sm',
-                  title: 'Guruhni o\'chirish',
-                  onClick: () => confirmDeleteGroup(group, () => renderGroups(container))
-                }, 'O\'chirish')
+                  style: 'color: var(--text-primary); text-decoration: none;',
+                  title: `${group.name} tafsilotlarini ko'rish`
+                }, group.name)
+              ),
+              el('td', { className: 'col-numeric' },
+                el('span', {
+                  className: group.student_count > 0 ? 'badge-group' : '',
+                  style: group.student_count > 0 ? 'color: var(--accent-primary); font-weight: 600;' : 'color: var(--text-muted);'
+                }, `${group.student_count} nafar`)
+              ),
+              el('td', { style: 'color: var(--text-muted); font-size: 0.8125rem;' }, formatDate(group.created_at)),
+              el('td', { className: 'col-actions' },
+                el('div', { style: 'display: flex; gap: var(--space-2); justify-content: flex-end;' },
+                  el('a', {
+                    href: `#/groups/${group.id}`,
+                    className: 'btn btn-secondary btn-sm',
+                    title: 'Guruh o\'quvchilarini ko\'rish'
+                  }, 'O\'quvchilar'),
+                  el('button', {
+                    type: 'button',
+                    className: 'btn btn-secondary btn-sm',
+                    title: 'Guruh nomini tahrirlash',
+                    onClick: () => showEditGroupModal(group, () => refreshData())
+                  }, 'Tahrirlash'),
+                  el('button', {
+                    type: 'button',
+                    className: 'btn btn-danger-outline btn-sm',
+                    title: 'Guruhni o\'chirish',
+                    onClick: () => confirmDeleteGroup(group, () => refreshData())
+                  }, 'O\'chirish')
+                )
               )
             )
           )
+        );
+
+        const table = el('div', { className: 'table-container' },
+          el('table', { className: 'data-table' },
+            el('thead', {},
+              el('tr', {},
+                el('th', {}, 'Guruh nomi'),
+                el('th', { className: 'col-numeric' }, 'O\'quvchilar soni'),
+                el('th', {}, 'Yaratilgan sana'),
+                el('th', { className: 'col-actions' }, 'Amallar')
+              )
+            ),
+            tbody
+          )
+        );
+
+        contentCard.appendChild(table);
+      }
+    } catch (err) {
+      contentCard.style.opacity = '1';
+      clearElement(contentCard);
+      contentCard.className = 'card';
+      contentCard.appendChild(
+        el('div', { className: 'error-banner' },
+          el('span', {}, err.message || 'Guruhlar ma\'lumotini yuklashda xatolik yuz berdi.'),
+          el('button', {
+            type: 'button',
+            className: 'btn btn-secondary btn-sm',
+            onClick: () => refreshData()
+          }, 'Qayta urinish')
         )
       );
-
-      const table = el('div', { className: 'table-container' },
-        el('table', { className: 'data-table' },
-          el('thead', {},
-            el('tr', {},
-              el('th', {}, 'Guruh nomi'),
-              el('th', { className: 'col-numeric' }, 'O\'quvchilar soni'),
-              el('th', {}, 'Yaratilgan sana'),
-              el('th', { className: 'col-actions' }, 'Amallar')
-            )
-          ),
-          tbody
-        )
-      );
-
-      contentCard.appendChild(table);
     }
+  }
 
-    const shell = createPageShell({
-      header: pageHeader,
-      body: [statsGrid, contentCard]
-    });
-    container.appendChild(shell.element);
+  await refreshData();
 
-    // Auto-open modal if query parameter action=new is present
-    if (queryParams.get('action') === 'new') {
-      showAddGroupModal(() => renderGroups(container));
-    }
-
-  } catch (err) {
-    renderStateView(
-      container,
-      el('div', { className: 'error-banner' },
-        el('span', {}, err.message || 'Guruhlar ma\'lumotini yuklashda xatolik yuz berdi.'),
-        el('button', {
-          className: 'btn btn-secondary btn-sm',
-          onClick: () => renderGroups(container, queryParams)
-        }, 'Qayta urinish')
-      )
-    );
+  // Auto-open modal if query parameter action=new is present
+  if (queryParams.get('action') === 'new') {
+    showAddGroupModal(() => refreshData());
   }
 }
 

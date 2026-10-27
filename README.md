@@ -21,13 +21,17 @@ Project Pay is an internal student tuition and payment management web applicatio
 
 ## Prerequisites & Installation
 
-- **Node.js**: v22+ or v24 LTS (with native `fetch` and `node:test` support, plus build tools if `better-sqlite3` compiles from source on your platform)
+- **Node.js**: v22+ or v24 LTS (with native `fetch` and `node:test` support)
 - **npm**: Included with Node.js
 
 Install dependencies from the project root:
 
 ```bash
+# macOS / Linux
 npm install
+
+# Windows PowerShell (use npm.cmd if PowerShell script execution policy restricts npm.ps1)
+npm.cmd install
 ```
 
 ## Configuration & Environment Variables
@@ -42,7 +46,14 @@ Configuration is read in `src/server.js` with sensible defaults so no `.env` fil
 Example with custom configuration:
 
 ```bash
+# macOS / Linux
 PORT=4000 DATABASE_PATH=./data/pay.db npm start
+
+# Windows PowerShell
+$env:PORT="4000"; $env:DATABASE_PATH="./data/pay.db"; npm.cmd start
+
+# Windows Command Prompt
+set PORT=4000 && set DATABASE_PATH=./data/pay.db && npm.cmd start
 ```
 
 ## Running the Application
@@ -50,11 +61,15 @@ PORT=4000 DATABASE_PATH=./data/pay.db npm start
 Start the server (initializes/migrates the SQLite database automatically if needed and serves both the API and web UI):
 
 ```bash
-# Production / standard startup
+# Standard startup (Linux/macOS)
 npm start
+
+# Standard startup (Windows PowerShell)
+npm.cmd start
 
 # Development startup
 npm run dev
+# Windows: npm.cmd run dev
 ```
 
 Once running, open `http://localhost:3000` in your browser.
@@ -64,21 +79,80 @@ Once running, open `http://localhost:3000` in your browser.
 Run the full automated unit and API integration test suite (uses isolated in-memory and temporary SQLite databases without touching `project_pay.db`):
 
 ```bash
+# Unit & API Integration Tests (263 passing tests)
 npm test
+# Windows: npm.cmd test
+
+# End-to-End Real Browser Tests (Firefox WebDriver BiDi, 10 passing workflows)
+npm run test:e2e
+# Windows: npm.cmd run test:e2e
+
+# Synthetic Load & Concurrency Benchmark
+npm run test:load
+# Windows: npm.cmd run test:load
 ```
 
 ## API Reference
 
 All request and response bodies use `application/json`. Monetary amounts (`monthly_fee`, `amount`, `total_paid`, `debt`) must be safe integers (UZS) — floating-point values and string numbers are rejected without silent coercion.
 
-### Debtors Report
+### Debtors & Reporting Endpoints
 
 - **`GET /debtors?month=YYYY-MM`** *(also available at `GET /api/reports/debtors?month=YYYY-MM`)*
   - **Query Parameters**: `month` (required, canonical `YYYY-MM` format with month `01`–`12`, e.g. `2026-10`).
-  - **Behavior**: Sums each student's payments with `payment_date` in `[YYYY-MM-01, nextMonth-01)` and returns only students whose `total_paid < monthly_fee`. Students with `monthly_fee = 0` (scholarship/free) and students who paid in full or overpaid are excluded. Excess payments from other months do not carry forward.
+  - **Behavior**: Sums each student's payments with `payment_date` in `[YYYY-MM-01, nextMonth-01)` and returns only students whose `total_paid < monthly_fee`. Students with `monthly_fee = 0` (scholarship/free) and students who paid in full or overpaid are excluded. Excess payments from other months do not carry forward. Includes `Cache-Control: no-store` to prevent stale browser responses.
   - **Responses**:
     - `200 OK`: `[{ "id": 1, "student_id": 1, "full_name": "Alisher Navoiy", "monthly_fee": 500000, "total_paid": 200000, "debt": 300000 }]`
     - `400 Bad Request`: Missing or malformed `month` parameter.
+
+- **`GET /api/reports/annual?year=YYYY`**
+  - **Query Parameters**: `year` (required, canonical 4-digit year `1900`–`2100`, e.g. `2026`).
+  - **Behavior**: Returns the calendar-year financial summary and complete 12-month breakdown (Yanvar through Dekabr) using underlying payment records. Includes total cash collected, payment transaction counts, unique paying students, active students, and monthly expected vs. outstanding debt figures.
+  - **Responses**:
+    - `200 OK`:
+      ```json
+      {
+        "year": 2026,
+        "total_collected": 1500000,
+        "payment_count": 4,
+        "paying_student_count": 2,
+        "active_students_count": 2,
+        "total_expected_year": 12000000,
+        "total_debt_year": 10500000,
+        "months": [
+          {
+            "month": "2026-01",
+            "month_name": "Yanvar",
+            "month_index": 1,
+            "total_collected": 0,
+            "payment_count": 0,
+            "paying_student_count": 0,
+            "debtor_count": 2,
+            "fully_paid_count": 0,
+            "total_expected": 1000000,
+            "total_debt": 1000000
+          }
+        ]
+      }
+      ```
+    - `400 Bad Request`: Missing or invalid `year` parameter.
+
+## Reporting Methodology & Data Model Definitions
+
+### 1. Monthly Debtor Calculation
+- **Period Attribution**: A payment is attributed strictly to the calendar month of its recorded `payment_date` (`[YYYY-MM-01, YYYY-MM-lastDay]`).
+- **Student Debt**: Calculated per fee-paying student (`monthly_fee > 0`) as `debt = MAX(0, s.monthly_fee - total_paid_in_month)`.
+- **Debtor Inclusion**: A student is included in the debtor list if and only if `s.monthly_fee > 0` AND their payments with `payment_date` in that month sum to `< s.monthly_fee`.
+- **Independence Across Months**: Each calendar month is calculated independently. Overpayments in one month do not roll over as credit into subsequent or prior months.
+
+### 2. Annual Financial Reporting
+- **Actual Cash Collections**: `total_collected` reflects the exact sum of all payment amounts recorded with `payment_date` within `[YYYY-01-01, YYYY-12-31]`.
+- **12-Month Calendar Breakdown**: All 12 months (January to December) are explicitly represented in chronological order. Months with zero activity display `total_collected: 0` without fabricating records or crashing.
+- **Expected Tuition & Debt in Annual View**: Calculated from registered fee-paying students.
+
+### 3. Historical Data Limitations
+- **Current Active Rate Basis**: In the Project Pay schema, students have an active `monthly_fee` integer column; historical tuition rate revisions and explicit enrollment start/end dates are not versioned in the database schema. Therefore, monthly debt and expected amounts reflect current active fee rates against actual payments recorded in that period.
+- **Cash-Basis Date Attribution**: Payments record `payment_date` (the calendar date cash was received) rather than an explicit `billing_month` (the target tuition period). All financial aggregation reports this distinction transparently in the UI notice banner.
 
 ### Students
 
