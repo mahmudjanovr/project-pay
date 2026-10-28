@@ -1,5 +1,5 @@
 /**
- * Reusable same-origin API client for Project Pay.
+ * Reusable same-origin API client for Ecomdev.
  * Formats request payloads and normalizes API error responses into clear Uzbek messages.
  */
 
@@ -236,6 +236,12 @@ export async function recordPayment({
 
 export async function confirmPayment(paymentId) {
   return request(`/api/payments/${paymentId}/confirm`, {
+    method: 'POST'
+  });
+}
+
+export async function rejectPayment(paymentId) {
+  return request(`/api/payments/${paymentId}/reject`, {
     method: 'POST'
   });
 }

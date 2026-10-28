@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-Browser End-to-End Test Suite for Project Pay.
+ * Real-Browser End-to-End Test Suite for Ecomdev.
  * Drives headless Mozilla Firefox over W3C WebDriver BiDi using native Node.js WebSocket.
  *
  * Safety guarantees:
@@ -1296,6 +1296,136 @@ async function runE2E() {
     assert.ok(annualRowsCount >= 12, 'Annual report must render all 12 months');
 
     completedWorkflows.push('Workflow 10: Financial Reporting, Month Calculations, PDF Receipts & Group Assignment');
+
+    // --------------------------------------------------------------------------
+    // WORKFLOW 11: Real-Browser End-to-End Administrator Verification
+    // (Full lifecycle: Groups, Students with 2026-10-28 enrollment, Pending/Confirm/Reject
+    //  payments, Receipt verification, Historical month isolation, Detail views & Reload)
+    // --------------------------------------------------------------------------
+    // 1. Create group
+    await ff.navigate(`${mainCtx.baseUrl}/#/groups?action=new`);
+    await ff.waitForModalOpen();
+    await ff.fillInput('#add-group-name', 'E2E QA Guruh');
+    await ff.clickSelector('#modal-overlay button[type="submit"]');
+    await ff.waitForModalClosed();
+    await ff.waitFor(`document.getElementById('main-content')?.textContent.includes('E2E QA Guruh')`);
+
+    const qaGroup = mainCtx.db.prepare("SELECT * FROM groups WHERE name = 'E2E QA Guruh'").get();
+    assert.ok(qaGroup, 'QA Group must be persisted in database');
+
+    // 2. Create student with 2026-10-28 enrollment
+    await ff.navigate(`${mainCtx.baseUrl}/#/students?action=new`);
+    await ff.waitForModalOpen();
+    await ff.fillInput('#add-student-name', 'Nodirbek E2E');
+    await ff.fillInput('#add-student-fee', '500000');
+    await ff.fillInput('#add-student-enrollment', '2026-10-28');
+    await ff.clickSelector('#modal-overlay button[type="submit"]');
+    await ff.waitForModalClosed();
+    await ff.fillInput('.search-input', 'Nodirbek');
+    await ff.waitFor(`document.getElementById('main-content')?.textContent.includes('Nodirbek E2E')`);
+
+    const nodirStudent = mainCtx.db.prepare("SELECT * FROM students WHERE full_name = 'Nodirbek E2E'").get();
+    assert.ok(nodirStudent);
+    assert.equal(nodirStudent.enrollment_date, '2026-10-28');
+
+    // 3. Assign Nodirbek to E2E QA Guruh
+    await ff.navigate(`${mainCtx.baseUrl}/#/groups/${qaGroup.id}`);
+    await ff.waitFor(`document.querySelector('.page-title') !== null`);
+    await ff.clickSelector('#btn-group-add-student');
+    await ff.waitForModalOpen();
+    await ff.fillInput('#assign-student-search', 'Nodirbek');
+    await ff.waitFor(`document.querySelector('#modal-overlay table tbody')?.textContent.includes('Nodirbek E2E')`);
+    await ff.eval(`(() => {
+      const row = Array.from(document.querySelectorAll('#modal-overlay table tbody tr')).find(r => r.textContent.includes('Nodirbek E2E'));
+      const cb = row.querySelector('input[type="checkbox"]');
+      if (cb) cb.click();
+    })()`);
+    await ff.clickSelector('#btn-assign-students-submit');
+    await ff.waitForModalClosed();
+    await ff.waitFor(`document.getElementById('main-content')?.textContent.includes('Nodirbek E2E')`);
+
+    // 4. Record pending payment for Nodirbek (250,000 UZS)
+    await ff.navigate(`${mainCtx.baseUrl}/#/payments?student_id=${nodirStudent.id}&month=2026-10`);
+    await ff.waitFor(`document.getElementById('payment-amount-input') !== null`);
+    await ff.waitFor(`document.getElementById('selected-student-card')?.style.display === 'flex'`);
+    await ff.fillInput('#payment-amount-input', '250000');
+    await ff.clickSelector('#payment-pending-btn');
+    await ff.waitFor(`document.getElementById('payment-success-banner')?.style.display !== 'none'`);
+
+    // Record second pending payment for Nodirbek (100,000 UZS)
+    await ff.navigate(`${mainCtx.baseUrl}/#/students`);
+    await ff.waitFor(`document.querySelector('.page-title')?.textContent === 'O\\'quvchilar'`);
+    await ff.navigate(`${mainCtx.baseUrl}/#/payments?student_id=${nodirStudent.id}&month=2026-10`);
+    await ff.waitFor(`document.getElementById('payment-amount-input') !== null`);
+    await ff.waitFor(`document.getElementById('selected-student-card')?.style.display === 'flex'`);
+    await ff.fillInput('#payment-amount-input', '100000');
+    await ff.clickSelector('#payment-pending-btn');
+    await ff.waitFor(`document.getElementById('payment-success-banner')?.style.display !== 'none'`);
+
+    // 5. Open Nodirbek's student detail page -> confirm 250k payment and reject 100k payment
+    await ff.navigate(`${mainCtx.baseUrl}/#/students/${nodirStudent.id}`);
+    await ff.waitFor(`document.querySelector('#main-content .data-table tbody tr') !== null`);
+    await ff.waitFor(`document.querySelector('.btn-danger-outline') !== null`);
+
+    // Reject the 100k payment (the row with '100 000' and 'Rad etish')
+    await ff.eval(`(() => {
+      const rows = Array.from(document.querySelectorAll('#main-content .data-table tbody tr'));
+      const row100k = rows.find(r => r.textContent.replace(/\\s+/g, ' ').includes('100 000'));
+      const rejectBtn = row100k ? row100k.querySelector('.btn-danger-outline') : null;
+      if (rejectBtn) rejectBtn.click();
+    })()`);
+    await ff.waitFor(`document.querySelector('#main-content .data-table tbody')?.textContent.includes('Rad etilgan')`);
+
+    // Confirm the 250k payment
+    await ff.eval(`(() => {
+      const rows = Array.from(document.querySelectorAll('#main-content .data-table tbody tr'));
+      const row250k = rows.find(r => r.textContent.replace(/\\s+/g, ' ').includes('250 000'));
+      const confirmBtn = row250k ? row250k.querySelector('.btn-primary') : null;
+      if (confirmBtn) confirmBtn.click();
+    })()`);
+    await ff.waitFor(`document.querySelector('#main-content .data-table tbody')?.textContent.includes('Chek (PDF)')`);
+
+    // 6. Verify enrollment month isolation: In September 2026, Nodirbek has ZERO debt
+    await ff.navigate(`${mainCtx.baseUrl}/#/reports?tab=debtors&month=2026-09`);
+    await ff.waitFor(`document.getElementById('report-month-label')?.textContent.includes('Sentabr')`);
+    await ff.waitFor(`document.getElementById('debtors-search-input') !== null`);
+    await ff.fillInput('#debtors-search-input', 'Nodirbek');
+    const nodirInSept = await ff.eval(`(() => {
+      const tbody = document.querySelector('#report-content .data-table tbody');
+      return tbody ? tbody.textContent.includes('Nodirbek E2E') : false;
+    })()`);
+    assert.equal(nodirInSept, false, 'October 28 enrollee must NOT be a debtor in September 2026');
+
+    // 7. In October 2026: Nodirbek has remaining debt of 250,000 UZS (500k fee - 250k confirmed; rejected 100k does not reduce)
+    await ff.fillInput('#debtor-month-input', '2026-10');
+    await ff.waitFor(`document.getElementById('report-month-label')?.textContent.includes('Oktabr')`);
+    await ff.waitFor(`document.getElementById('debtors-search-input') !== null`);
+    await ff.fillInput('#debtors-search-input', 'Nodirbek');
+    await ff.waitFor(`document.querySelector('#report-content .data-table tbody')?.textContent.includes('Nodirbek E2E')`);
+    const nodirOctRow = await ff.eval(`(() => {
+      const rows = Array.from(document.querySelectorAll('#report-content .data-table tbody tr'));
+      const row = rows.find(r => r.textContent.includes('Nodirbek E2E'));
+      return row ? row.textContent : '';
+    })()`);
+    assert.ok(nodirOctRow.replace(/\s+/g, ' ').includes('250 000'), 'October remaining debt must be 250 000');
+
+    // 8. Edit student details
+    await ff.navigate(`${mainCtx.baseUrl}/#/students/${nodirStudent.id}`);
+    await ff.waitFor(`document.querySelector('.page-actions button') !== null`);
+    await ff.clickSelector('.page-actions button'); // Edit button
+    await ff.waitForModalOpen();
+    await ff.fillInput('#modal-overlay input[id^="edit-student-phone-"]', '+998 90 888 77 66');
+    await ff.clickSelector('#modal-overlay button[type="submit"]');
+    await ff.waitForModalClosed();
+    await ff.waitFor(`document.getElementById('main-content')?.textContent.includes('+998 90 888 77 66')`);
+
+    // 9. Full page reload and server state persistence
+    await ff.reload();
+    await ff.waitFor(`document.getElementById('main-content')?.textContent.includes('+998 90 888 77 66')`);
+    await ff.waitFor(`document.getElementById('main-content')?.textContent.includes('Chek (PDF)')`);
+    await ff.waitFor(`document.getElementById('main-content')?.textContent.includes('Rad etilgan')`);
+
+    completedWorkflows.push('Workflow 11: Real-Browser End-to-End Administrator Verification');
 
     for (const line of completedWorkflows) {
       console.log(`[PASS] ${line}`);

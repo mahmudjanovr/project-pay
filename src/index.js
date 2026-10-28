@@ -1,5 +1,5 @@
 /**
- * Project Pay — Backend API & Business Foundation
+ * Ecomdev — Backend API & Business Foundation
  * Main entry point re-exporting connection, initialization, schemas, services, and Express app.
  */
 

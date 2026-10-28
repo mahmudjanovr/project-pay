@@ -7,9 +7,19 @@ import { getCurrentUtcIsoString } from '../utils/date.js';
 
 const groupStmtCache = new WeakMap();
 
+function hasColumn(db, table, col) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+    return cols.some((c) => c.name === col);
+  } catch {
+    return false;
+  }
+}
+
 function getGroupStmts(db) {
   let stmts = groupStmtCache.get(db);
   if (!stmts) {
+    const supportsEnrollment = hasColumn(db, 'students', 'enrollment_date');
     stmts = {
       list: db.prepare(`
         SELECT
@@ -36,20 +46,36 @@ function getGroupStmts(db) {
       insert: db.prepare('INSERT INTO groups (name, created_at) VALUES (?, ?)'),
       update: db.prepare('UPDATE groups SET name = ? WHERE id = ?'),
       deleteById: db.prepare('DELETE FROM groups WHERE id = ?'),
-      studentsByGroup: db.prepare(`
-        SELECT
-          s.id,
-          s.full_name,
-          s.phone,
-          s.monthly_fee,
-          s.created_at,
-          s.group_id,
-          g.name AS group_name
-        FROM students s
-        JOIN groups g ON g.id = s.group_id
-        WHERE s.group_id = ?
-        ORDER BY s.id ASC;
-      `)
+      studentsByGroup: supportsEnrollment
+        ? db.prepare(`
+            SELECT
+              s.id,
+              s.full_name,
+              s.phone,
+              s.monthly_fee,
+              s.created_at,
+              s.group_id,
+              s.enrollment_date,
+              g.name AS group_name
+            FROM students s
+            JOIN groups g ON g.id = s.group_id
+            WHERE s.group_id = ?
+            ORDER BY s.id ASC;
+          `)
+        : db.prepare(`
+            SELECT
+              s.id,
+              s.full_name,
+              s.phone,
+              s.monthly_fee,
+              s.created_at,
+              s.group_id,
+              g.name AS group_name
+            FROM students s
+            JOIN groups g ON g.id = s.group_id
+            WHERE s.group_id = ?
+            ORDER BY s.id ASC;
+          `)
     };
     groupStmtCache.set(db, stmts);
   }

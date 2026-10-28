@@ -32,7 +32,7 @@ test('Frontend Static File Serving and SPA Integration', async (t) => {
     assert.ok(res.headers.get('content-type')?.includes('text/html'));
     const body = await res.text();
     assert.ok(body.includes('<!DOCTYPE html>'));
-    assert.ok(body.includes('Project Pay'));
+    assert.ok(body.includes('Ecomdev'));
     assert.ok(body.includes('id="main-content"'));
     assert.ok(body.includes('id="app-sidebar"'));
   });

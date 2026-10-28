@@ -1,5 +1,5 @@
 /**
- * Students Management View for Project Pay.
+ * Students Management View for Ecomdev.
  * Provides student listing with group tags, real-time filtering, adding, editing, and deletion with conflict safety.
  */
 

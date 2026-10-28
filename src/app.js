@@ -1,5 +1,5 @@
 /**
- * Express application factory for Project Pay.
+ * Express application factory for Ecomdev.
  * Configures middleware, API routes, static frontend serving, 404 fallback, and secure error handling.
  */
 

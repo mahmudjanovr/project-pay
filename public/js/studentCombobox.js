@@ -1,5 +1,5 @@
 /**
- * Accessible Searchable Student Combobox Component for Project Pay.
+ * Accessible Searchable Student Combobox Component for Ecomdev.
  * Provides instant client-side filtering, keyboard navigation, clear selected state,
  * and preselection support.
  */

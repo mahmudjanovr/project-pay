@@ -51,14 +51,16 @@ test('Priority 1: Isolated deterministic fixtures for September, October, Novemb
   const sUnpaid = createStudent(db, {
     full_name: 'Anvar Qodirov',
     monthly_fee: 500000,
-    group_id: g1.id
+    group_id: g1.id,
+    enrollment_date: '2026-09-01'
   });
 
   // 2. Fully paid student in September, unpaid in other months
   const sPaidSep = createStudent(db, {
     full_name: 'Barno Karimova',
     monthly_fee: 600000,
-    group_id: g1.id
+    group_id: g1.id,
+    enrollment_date: '2026-09-01'
   });
   createPayment(db, {
     student_id: sPaidSep.id,
@@ -72,7 +74,8 @@ test('Priority 1: Isolated deterministic fixtures for September, October, Novemb
   const sPartial = createStudent(db, {
     full_name: 'Dildora Sobirova',
     monthly_fee: 400000,
-    group_id: g2.id
+    group_id: g2.id,
+    enrollment_date: '2026-09-01'
   });
   createPayment(db, {
     student_id: sPartial.id,
@@ -86,7 +89,8 @@ test('Priority 1: Isolated deterministic fixtures for September, October, Novemb
   const sPending = createStudent(db, {
     full_name: 'Eldor Ergashev',
     monthly_fee: 500000,
-    group_id: g2.id
+    group_id: g2.id,
+    enrollment_date: '2026-09-01'
   });
   createPayment(db, {
     student_id: sPending.id,
@@ -100,7 +104,8 @@ test('Priority 1: Isolated deterministic fixtures for September, October, Novemb
   const sPaidOct = createStudent(db, {
     full_name: 'Farhod Toshev',
     monthly_fee: 500000,
-    group_id: g2.id
+    group_id: g2.id,
+    enrollment_date: '2026-09-01'
   });
   createPayment(db, {
     student_id: sPaidOct.id,
@@ -114,7 +119,8 @@ test('Priority 1: Isolated deterministic fixtures for September, October, Novemb
   const sExempt = createStudent(db, {
     full_name: 'Gulnoza Grant',
     monthly_fee: 0,
-    group_id: g1.id
+    group_id: g1.id,
+    enrollment_date: '2026-09-01'
   });
 
   // 7. Student enrolled in November 2026 -> not liable in Sep or Oct; liable in Nov and Dec!
@@ -443,4 +449,263 @@ test('Priority 4: Assign existing students to groups', async (t) => {
   } finally {
     await ctx.close();
   }
+});
+
+test('Student enrollment date logic, pre-2026 enrollments, and backdated billing reconciliation', async (t) => {
+  const ctx = await createTestServer();
+  try {
+    const db = ctx.db;
+
+    // 1. Student enrolled on 2026-10-28 (explicit enrollment_date)
+    const sOctExplicit = createStudent(db, {
+      full_name: 'Oktyabrda Kelgan (Aniq Sana)',
+      monthly_fee: 500000,
+      enrollment_date: '2026-10-28'
+    });
+
+    // 2. Student added in October 2026 without explicit enrollment_date (defaults canonical to created_at date in 2026-10)
+    const sOctCreated = createStudent(db, {
+      full_name: 'Oktyabrda Kelgan (Created At)',
+      monthly_fee: 600000
+    });
+
+    // 3. Student enrolled before 2026 (e.g. 2025-08-15) -> liable for all 12 months in 2026
+    const sPre2026 = createStudent(db, {
+      full_name: 'Eski Talaba (2025-yilda kelgan)',
+      monthly_fee: 400000,
+      enrollment_date: '2025-08-15'
+    });
+
+    // 4. Student enrolled in September 2026 (for backdated payment test)
+    const sSepEnrolled = createStudent(db, {
+      full_name: 'Sentyabrda Kelgan Talaba',
+      monthly_fee: 450000,
+      enrollment_date: '2026-09-01'
+    });
+
+    // Backdated payment: Money received in October 2026 (2026-10-15) covering September tuition (2026-09)
+    createPayment(db, {
+      student_id: sSepEnrolled.id,
+      amount: 450000,
+      payment_date: '2026-10-15',
+      billing_month: '2026-09',
+      status: 'confirmed'
+    });
+
+    await t.test('January–September 2026: Students enrolled on 2026-10-28 have ZERO expected tuition and ZERO debt', () => {
+      for (const m of ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08']) {
+        const overview = getMonthlyOverview(db, m);
+        const debtors = getMonthlyDebtors(db, m);
+
+        // In Jan–Aug, only sPre2026 is enrolled
+        assert.equal(overview.total_expected, 400000, `Month ${m} expected must only be sPre2026 (400k)`);
+        assert.equal(overview.total_debt, 400000, `Month ${m} debt must only be sPre2026 (400k)`);
+        assert.equal(overview.debtor_count, 1);
+        assert.equal(debtors.length, 1);
+        assert.equal(debtors[0].student_id, sPre2026.id);
+
+        // Neither October student must be present in debtors or contribute to liabilities
+        assert.equal(debtors.some((d) => d.student_id === sOctExplicit.id), false);
+        assert.equal(debtors.some((d) => d.student_id === sOctCreated.id), false);
+        assert.equal(debtors.some((d) => d.student_id === sSepEnrolled.id), false);
+      }
+    });
+
+    await t.test('September 2026: sSepEnrolled is liable and fully cleared by backdated payment, Oct students still NOT liable', () => {
+      const sepOverview = getMonthlyOverview(db, '2026-09');
+      const sepDebtors = getMonthlyDebtors(db, '2026-09');
+
+      // Enrolled in Sep: sPre2026 (400k) + sSepEnrolled (450k) = 850,000
+      assert.equal(sepOverview.total_expected, 850000);
+      // Confirmed billing payment in Sep: sSepEnrolled paid 450,000 for 2026-09
+      assert.equal(sepOverview.total_confirmed, 450000);
+      // Debt in Sep: sPre2026 owes 400,000; sSepEnrolled owes 0
+      assert.equal(sepOverview.total_debt, 400000);
+      assert.equal(sepOverview.debtor_count, 1);
+      assert.equal(sepDebtors.length, 1);
+      assert.equal(sepDebtors[0].student_id, sPre2026.id);
+
+      // October students must NOT appear in September
+      assert.equal(sepDebtors.some((d) => d.student_id === sOctExplicit.id), false);
+      assert.equal(sepDebtors.some((d) => d.student_id === sOctCreated.id), false);
+    });
+
+    await t.test('October 2026: October students become liable; backdated payment does NOT reduce October debt', () => {
+      const octOverview = getMonthlyOverview(db, '2026-10');
+      const octDebtors = getMonthlyDebtors(db, '2026-10');
+
+      // Liable students in October:
+      // sPre2026: 400,000
+      // sSepEnrolled: 450,000 (September payment covered September, owes October!)
+      // sOctExplicit: 500,000
+      // sOctCreated: 600,000
+      // Total expected = 400k + 450k + 500k + 600k = 1,950,000
+      assert.equal(octOverview.total_expected, 1950000);
+      assert.equal(octOverview.total_confirmed, 0, 'No payment allocated to October billing month');
+      assert.equal(octOverview.total_debt, 1950000);
+      assert.equal(octOverview.debtor_count, 4);
+      assert.equal(octDebtors.length, 4);
+
+      assert.ok(octDebtors.find((d) => d.student_id === sOctExplicit.id));
+      assert.ok(octDebtors.find((d) => d.student_id === sOctCreated.id));
+      assert.ok(octDebtors.find((d) => d.student_id === sSepEnrolled.id));
+      assert.ok(octDebtors.find((d) => d.student_id === sPre2026.id));
+    });
+
+    await t.test('November & December 2026: October students remain liable according to enrollment-month policy', () => {
+      for (const m of ['2026-11', '2026-12']) {
+        const overview = getMonthlyOverview(db, m);
+        assert.equal(overview.total_expected, 1950000);
+        assert.equal(overview.total_debt, 1950000);
+        assert.equal(overview.debtor_count, 4);
+      }
+    });
+
+    await t.test('Annual report: separates billing month confirmed revenue from actual cash-receipt date', async () => {
+      const annualRes = await fetch(`${ctx.baseUrl}/api/reports/annual?year=2026`);
+      assert.equal(annualRes.status, 200);
+      const annual = await annualRes.json();
+
+      assert.equal(annual.months.length, 12);
+
+      const sepRow = annual.months.find((m) => m.month === '2026-09');
+      const octRow = annual.months.find((m) => m.month === '2026-10');
+
+      // September: confirmed billing revenue is 450,000; cash received by date is 0
+      assert.equal(sepRow.confirmed_billing, 450000);
+      assert.equal(sepRow.cash_received_by_date, 0);
+
+      // October: confirmed billing revenue is 0; cash received by date is 450,000 (payment date: 2026-10-15)
+      assert.equal(octRow.confirmed_billing, 0);
+      assert.equal(octRow.cash_received_by_date, 450000);
+
+      // Reconcile annual totals with monthly sums
+      const sumExpected = annual.months.reduce((s, m) => s + m.expected, 0);
+      const sumConfirmed = annual.months.reduce((s, m) => s + m.confirmed_billing, 0);
+      const sumPending = annual.months.reduce((s, m) => s + m.pending_billing, 0);
+      const sumDebt = annual.months.reduce((s, m) => s + m.debt, 0);
+      const sumCash = annual.months.reduce((s, m) => s + m.cash_received_by_date, 0);
+
+      assert.equal(annual.totals.total_expected, sumExpected);
+      assert.equal(annual.totals.total_confirmed_billing, sumConfirmed);
+      assert.equal(annual.totals.total_pending_billing, sumPending);
+      assert.equal(annual.totals.total_debt, sumDebt);
+      assert.equal(annual.totals.total_cash_received, sumCash);
+    });
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('Regression: Five-student dataset with mixed enrollment dates and payments confirms 2,600,000 UZS expected in Oct, Nov, Dec', async (t) => {
+  const db = createDatabase(':memory:');
+  initDatabase(db);
+
+  // Five students added on 2026-10-28:
+  // Student 1: 450,000 UZS, enrollment_date: null
+  const s1 = createStudent(db, {
+    full_name: 'Talaba 1',
+    monthly_fee: 450000
+  });
+
+  // Student 2: 450,000 UZS, enrollment_date: 2026-10-28
+  const s2 = createStudent(db, {
+    full_name: 'Maxmudjonov Raxmatillo',
+    monthly_fee: 450000,
+    enrollment_date: '2026-10-28'
+  });
+
+  // Student 3: 500,000 UZS, enrollment_date: 2026-10-28
+  const s3 = createStudent(db, {
+    full_name: 'Talaba 3',
+    monthly_fee: 500000,
+    enrollment_date: '2026-10-28'
+  });
+
+  // Student 5: 700,000 UZS, enrollment_date: 2026-10-28
+  const s5 = createStudent(db, {
+    full_name: 'Maxmudjonov Bunyodbek',
+    monthly_fee: 700000,
+    enrollment_date: '2026-10-28'
+  });
+
+  // Student 6: 500,000 UZS, enrollment_date: 2026-10-28
+  const s6 = createStudent(db, {
+    full_name: 'Alisher Navoiy',
+    monthly_fee: 500000,
+    enrollment_date: '2026-10-28'
+  });
+
+  // Payments for 2026-10:
+  // s1: 450k cash + 450k card
+  createPayment(db, { student_id: s1.id, amount: 450000, payment_date: '2026-10-28', billing_month: '2026-10', status: 'confirmed' });
+  createPayment(db, { student_id: s1.id, amount: 450000, payment_date: '2026-10-28', billing_month: '2026-10', status: 'confirmed' });
+  // s2: 450k cash
+  createPayment(db, { student_id: s2.id, amount: 450000, payment_date: '2026-10-28', billing_month: '2026-10', status: 'confirmed' });
+  // s3: 500k cash
+  createPayment(db, { student_id: s3.id, amount: 500000, payment_date: '2026-10-28', billing_month: '2026-10', status: 'confirmed' });
+  // s5: 700k cash
+  createPayment(db, { student_id: s5.id, amount: 700000, payment_date: '2026-10-28', billing_month: '2026-10', status: 'confirmed' });
+  // s6: 500k card
+  createPayment(db, { student_id: s6.id, amount: 500000, payment_date: '2026-10-28', billing_month: '2026-10', status: 'confirmed' });
+
+  await t.test('January–September 2026: expected is 0 and debt is 0', () => {
+    for (let m = 1; m <= 9; m++) {
+      const monthStr = `2026-${String(m).padStart(2, '0')}`;
+      const overview = getMonthlyOverview(db, monthStr);
+      assert.equal(overview.total_expected, 0);
+      assert.equal(overview.total_confirmed, 0);
+      assert.equal(overview.total_debt, 0);
+      assert.equal(overview.debtor_count, 0);
+    }
+  });
+
+  await t.test('October 2026: all five students are counted (expected = 2,600,000 UZS), confirmed = 3,050,000 UZS, debt = 0', () => {
+    const overview = getMonthlyOverview(db, '2026-10');
+    assert.equal(overview.total_expected, 2600000, 'Expected tuition must be 2,600,000 UZS for October');
+    assert.equal(overview.total_confirmed, 3050000, 'Confirmed payments include all 5 students (with s1 overpayment)');
+    assert.equal(overview.total_debt, 0);
+    assert.equal(overview.debtor_count, 0);
+
+    const debtors = getMonthlyDebtors(db, '2026-10');
+    assert.equal(debtors.length, 0);
+
+    const groups = getGroupReports(db, '2026-10');
+    const groupExpectedSum = groups.reduce((sum, g) => sum + g.total_expected, 0);
+    const groupConfirmedSum = groups.reduce((sum, g) => sum + g.total_confirmed, 0);
+    assert.equal(groupExpectedSum, 2600000);
+    assert.equal(groupConfirmedSum, 3050000);
+  });
+
+  await t.test('November 2026: all five students are counted (expected = 2,600,000 UZS), debt = 2,600,000 UZS, 5 debtors', () => {
+    const overview = getMonthlyOverview(db, '2026-11');
+    assert.equal(overview.total_expected, 2600000);
+    assert.equal(overview.total_confirmed, 0);
+    assert.equal(overview.total_debt, 2600000);
+    assert.equal(overview.debtor_count, 5);
+
+    const debtors = getMonthlyDebtors(db, '2026-11');
+    assert.equal(debtors.length, 5);
+    const ids = debtors.map((d) => d.student_id).sort();
+    assert.deepEqual(ids, [s1.id, s2.id, s3.id, s5.id, s6.id].sort());
+  });
+
+  await t.test('December 2026: all five students are counted (expected = 2,600,000 UZS), debt = 2,600,000 UZS, 5 debtors', () => {
+    const overview = getMonthlyOverview(db, '2026-12');
+    assert.equal(overview.total_expected, 2600000);
+    assert.equal(overview.total_confirmed, 0);
+    assert.equal(overview.total_debt, 2600000);
+    assert.equal(overview.debtor_count, 5);
+
+    const debtors = getMonthlyDebtors(db, '2026-12');
+    assert.equal(debtors.length, 5);
+  });
+
+  await t.test('Annual report totals verify 7,800,000 UZS annual expected across 12 months', () => {
+    const annual = getAnnualOverview(db, '2026');
+    assert.equal(annual.totals.total_expected, 7800000);
+    assert.equal(annual.totals.total_confirmed_billing, 3050000);
+    assert.equal(annual.totals.total_debt, 5200000);
+    assert.equal(annual.totals.total_cash_received, 3050000);
+  });
 });

@@ -1,5 +1,5 @@
 /**
- * Monthly Debtor Report View for Project Pay.
+ * Monthly Debtor Report View for Ecomdev.
  * Delegates to the unified Reports view with the 'debtors' tab active.
  */
 

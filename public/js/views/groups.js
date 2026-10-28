@@ -1,5 +1,5 @@
 /**
- * Groups Management View for Project Pay.
+ * Groups Management View for Ecomdev.
  * Provides group listing with assigned student counts, creating, renaming, and safe deletion.
  */
 

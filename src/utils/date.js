@@ -1,5 +1,5 @@
 /**
- * Date utility functions for Project Pay.
+ * Date utility functions for Ecomdev.
  * Enforces calendar validity, leap-year calculations, and report month boundary resolution.
  */
 
@@ -128,3 +128,22 @@ export function getMonthDateRange(reportMonth) {
 export function getCurrentUtcIsoString() {
   return new Date().toISOString();
 }
+
+/**
+ * Canonical SQL expression that resolves a student's effective enrollment month (YYYY-MM).
+ * Strictly validates that enrollment_date is a real calendar date (YYYY-MM-DD or YYYY-MM),
+ * safely falling back to created_at month for null, empty, malformed, or impossible dates.
+ */
+export const EFFECTIVE_ENROLLMENT_MONTH_SQL = `
+  CASE
+    WHEN s.enrollment_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'
+     AND date(s.enrollment_date) IS NOT NULL
+     AND date(s.enrollment_date) = s.enrollment_date
+    THEN substr(s.enrollment_date, 1, 7)
+    WHEN s.enrollment_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]'
+     AND date(s.enrollment_date || '-01') IS NOT NULL
+     AND date(s.enrollment_date || '-01') = (s.enrollment_date || '-01')
+    THEN s.enrollment_date
+    ELSE substr(s.created_at, 1, 7)
+  END
+`.trim();

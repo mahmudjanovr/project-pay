@@ -449,15 +449,15 @@ test('Financial Calculations and Debtor Reports Independence from Groups', async
   const groupMobile = createGroup(db, { name: 'Mobile Dev' });
 
   // Student 1: in Web Dev, 1,000,000 fee, paid 600,000 in May 2026 -> debt 400,000
-  const s1 = createStudent(db, { full_name: 'Student 1', monthly_fee: 1000000, group_id: groupWeb.id });
+  const s1 = createStudent(db, { full_name: 'Student 1', monthly_fee: 1000000, group_id: groupWeb.id, enrollment_date: '2026-05-01' });
   createPayment(db, { student_id: s1.id, amount: 600000, payment_date: '2026-05-05' });
 
   // Student 2: in Mobile Dev, 1,200,000 fee, paid 1,200,000 in May 2026 -> no debt (0)
-  const s2 = createStudent(db, { full_name: 'Student 2', monthly_fee: 1200000, group_id: groupMobile.id });
+  const s2 = createStudent(db, { full_name: 'Student 2', monthly_fee: 1200000, group_id: groupMobile.id, enrollment_date: '2026-05-01' });
   createPayment(db, { student_id: s2.id, amount: 1200000, payment_date: '2026-05-15' });
 
   // Student 3: no group, 800,000 fee, paid 0 in May 2026 -> debt 800,000
-  const s3 = createStudent(db, { full_name: 'Student 3', monthly_fee: 800000, group_id: null });
+  const s3 = createStudent(db, { full_name: 'Student 3', monthly_fee: 800000, group_id: null, enrollment_date: '2026-05-01' });
 
   const debtors = getMonthlyDebtors(db, '2026-05');
   assert.equal(debtors.length, 2);

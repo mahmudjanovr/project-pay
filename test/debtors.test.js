@@ -18,11 +18,11 @@ test('Monthly debtor calculation business rules', async (t) => {
   // Student 3: 500,000 UZS fee, overpayment in May 2026 (700,000 UZS) -> Debt: 0 (not in debtors)
   // Student 4: 1,200,000 UZS fee, NO payments in May 2026 -> Debt: 1,200,000 (paid: 0)
   // Student 5: 0 UZS fee (scholarship), no payments -> Debt: 0 (not in debtors)
-  const s1 = createStudent(db, { full_name: 'Student One', monthly_fee: 1000000 });
-  const s2 = createStudent(db, { full_name: 'Student Two', monthly_fee: 800000 });
-  const s3 = createStudent(db, { full_name: 'Student Three', monthly_fee: 500000 });
-  const s4 = createStudent(db, { full_name: 'Student Four', monthly_fee: 1200000 });
-  const s5 = createStudent(db, { full_name: 'Scholarship Student', monthly_fee: 0 });
+  const s1 = createStudent(db, { full_name: 'Student One', monthly_fee: 1000000, enrollment_date: '2026-05-01' });
+  const s2 = createStudent(db, { full_name: 'Student Two', monthly_fee: 800000, enrollment_date: '2026-05-01' });
+  const s3 = createStudent(db, { full_name: 'Student Three', monthly_fee: 500000, enrollment_date: '2026-05-01' });
+  const s4 = createStudent(db, { full_name: 'Student Four', monthly_fee: 1200000, enrollment_date: '2026-05-01' });
+  const s5 = createStudent(db, { full_name: 'Scholarship Student', monthly_fee: 0, enrollment_date: '2026-05-01' });
 
   // Payments for May 2026 (2026-05)
   createPayment(db, { student_id: s1.id, amount: 400000, payment_date: '2026-05-10' });
@@ -91,7 +91,7 @@ test('Month boundary conditions and multiple payments', async (t) => {
   initDatabase(db);
 
   // Student with 1,000,000 fee
-  const student = createStudent(db, { full_name: 'Boundary Test Student', monthly_fee: 1000000 });
+  const student = createStudent(db, { full_name: 'Boundary Test Student', monthly_fee: 1000000, enrollment_date: '2026-05-01' });
 
   await t.test('payments on first day and last day of month are included', () => {
     // Payment on first day of May: 2026-05-01
@@ -106,7 +106,7 @@ test('Month boundary conditions and multiple payments', async (t) => {
   });
 
   await t.test('payments immediately outside boundaries are strictly excluded', () => {
-    const student2 = createStudent(db, { full_name: 'Outside Boundary Student', monthly_fee: 1000000 });
+    const student2 = createStudent(db, { full_name: 'Outside Boundary Student', monthly_fee: 1000000, enrollment_date: '2026-05-01' });
 
     // Payment immediately before May: 2026-04-30
     createPayment(db, { student_id: student2.id, amount: 500000, payment_date: '2026-04-30' });
@@ -123,7 +123,7 @@ test('Month boundary conditions and multiple payments', async (t) => {
   });
 
   await t.test('multiple payments in one month are summed correctly without duplicate rows', () => {
-    const student3 = createStudent(db, { full_name: 'Multi Payment Student', monthly_fee: 1000000 });
+    const student3 = createStudent(db, { full_name: 'Multi Payment Student', monthly_fee: 1000000, enrollment_date: '2026-05-01' });
 
     // Three payments in May 2026
     createPayment(db, { student_id: student3.id, amount: 150000, payment_date: '2026-05-05' });

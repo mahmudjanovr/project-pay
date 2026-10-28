@@ -1,12 +1,12 @@
 /**
- * Reporting service for Project Pay.
+ * Reporting service for Ecomdev.
  * Provides monthly overview, group-level breakdown, and annual overview reports
  * with strict reconciliation against debtor calculations.
  */
 
 import { validateReportMonth, validateReportYear } from '../validators/index.js';
 import { getMonthlyDebtors } from './debtors.js';
-import { getMonthDateRange } from '../utils/date.js';
+import { getMonthDateRange, EFFECTIVE_ENROLLMENT_MONTH_SQL } from '../utils/date.js';
 
 const UZBEK_MONTH_NAMES = [
   'Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun',
@@ -29,8 +29,8 @@ export function getMonthlyOverview(db, reportMonth) {
       COUNT(*) AS total_students,
       COUNT(CASE WHEN monthly_fee > 0 THEN 1 END) AS fee_paying_students,
       COALESCE(SUM(monthly_fee), 0) AS total_expected
-    FROM students
-    WHERE (enrollment_date IS NULL OR substr(enrollment_date, 1, 7) <= ?);
+    FROM students s
+    WHERE (${EFFECTIVE_ENROLLMENT_MONTH_SQL}) <= ?;
   `);
   const liableInfo = liableStmt.get(validMonth);
   const totalExpected = Number(liableInfo.total_expected);
@@ -39,18 +39,29 @@ export function getMonthlyOverview(db, reportMonth) {
   // 2. Confirmed & pending payment sums for this billing month
   const paymentsStmt = db.prepare(`
     SELECT
-      COALESCE(SUM(CASE WHEN COALESCE(status, 'confirmed') = 'confirmed' THEN amount ELSE 0 END), 0) AS total_confirmed,
-      COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END), 0) AS total_pending,
-      COUNT(CASE WHEN status = 'pending' THEN 1 END) AS pending_count
-    FROM payments
-    WHERE COALESCE(billing_month, substr(payment_date, 1, 7)) = ?;
+      COALESCE(SUM(CASE WHEN COALESCE(p.status, 'confirmed') = 'confirmed' THEN p.amount ELSE 0 END), 0) AS total_confirmed,
+      COALESCE(SUM(CASE WHEN p.status = 'pending' THEN p.amount ELSE 0 END), 0) AS total_pending,
+      COUNT(CASE WHEN p.status = 'pending' THEN 1 END) AS pending_count
+    FROM payments p
+    WHERE COALESCE(p.billing_month, substr(p.payment_date, 1, 7)) = ?;
   `);
   const paymentInfo = paymentsStmt.get(validMonth);
   const totalConfirmed = Number(paymentInfo.total_confirmed);
   const totalPending = Number(paymentInfo.total_pending);
   const pendingCount = Number(paymentInfo.pending_count);
 
-  // 3. Debtors from the authoritative debtor calculation engine
+  // 3. Cash received by actual payment date in this calendar month
+  const { startOfMonth, endOfMonth } = getMonthDateRange(validMonth);
+  const cashStmt = db.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS total_cash
+    FROM payments
+    WHERE payment_date >= ? AND payment_date <= ?
+      AND COALESCE(status, 'confirmed') = 'confirmed';
+  `);
+  const cashRow = cashStmt.get(startOfMonth, endOfMonth);
+  const totalCashReceived = Number(cashRow.total_cash);
+
+  // 4. Debtors from the authoritative debtor calculation engine
   const debtors = getMonthlyDebtors(db, validMonth);
   let totalDebtBigInt = 0n;
   for (const d of debtors) {
@@ -71,6 +82,7 @@ export function getMonthlyOverview(db, reportMonth) {
     month: validMonth,
     total_expected: totalExpected,
     total_confirmed: totalConfirmed,
+    total_cash_received: totalCashReceived,
     total_pending: totalPending,
     total_debt: totalDebt,
     debtor_count: debtorCount,
@@ -117,7 +129,7 @@ export function getGroupReports(db, reportMonth) {
       WHERE COALESCE(billing_month, substr(payment_date, 1, 7)) = ?
       GROUP BY student_id
     ) p ON s.id = p.student_id
-    WHERE (s.enrollment_date IS NULL OR substr(s.enrollment_date, 1, 7) <= ?)
+    WHERE (${EFFECTIVE_ENROLLMENT_MONTH_SQL}) <= ?
     ORDER BY s.full_name COLLATE NOCASE ASC;
   `);
 
@@ -233,17 +245,7 @@ export function getAnnualOverview(db, reportYear) {
     const monthName = UZBEK_MONTH_NAMES[m - 1];
 
     const overview = getMonthlyOverview(db, monthStr);
-
-    // Cash received by actual payment receipt date within this calendar month
-    const { startOfMonth, endOfMonth } = getMonthDateRange(monthStr);
-    const cashStmt = db.prepare(`
-      SELECT COALESCE(SUM(amount), 0) AS total_cash
-      FROM payments
-      WHERE payment_date >= ? AND payment_date <= ?
-        AND COALESCE(status, 'confirmed') = 'confirmed';
-    `);
-    const cashRow = cashStmt.get(startOfMonth, endOfMonth);
-    const cashReceived = Number(cashRow.total_cash);
+    const cashReceived = overview.total_cash_received;
 
     totalExpected += BigInt(overview.total_expected);
     totalConfirmed += BigInt(overview.total_confirmed);

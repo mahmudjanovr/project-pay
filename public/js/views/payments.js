@@ -1,5 +1,5 @@
 /**
- * Record Payment View for Project Pay.
+ * Record Payment View for Ecomdev.
  * Form for submitting payments with searchable student selection, robust amount parsing,
  * billing month selection, duplicate protection, explicit confirmation workflow, and receipt generation.
  */

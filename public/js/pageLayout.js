@@ -1,5 +1,5 @@
 /**
- * Shared Page Shell & Section Layout Helpers for Project Pay.
+ * Shared Page Shell & Section Layout Helpers for Ecomdev.
  * Keeps section headings and action/filter toolbars persistent while
  * dedicating vertical scrolling to the section's content/table region.
  */

@@ -1,5 +1,5 @@
 /**
- * Reusable modal dialog utility for Project Pay.
+ * Reusable modal dialog utility for Ecomdev.
  */
 
 import { el, clearElement } from './dom.js';

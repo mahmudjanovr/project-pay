@@ -1,6 +1,6 @@
-# Project Pay
+# Ecomdev
 
-Project Pay is an internal student tuition and payment management web application for an educational training center, built for the Ecomdev developer assignment. It manages students, study groups, tuition payment records, and monthly debtor reports from a single same-origin Node.js application.
+Ecomdev is an internal student tuition and payment management web application for an educational training center, built for the Ecomdev developer assignment. It manages students, study groups, tuition payment records, and monthly debtor reports from a single same-origin Node.js application.
 
 ## Main Features
 

@@ -1,5 +1,5 @@
 /**
- * Database schema and migrations definition for Project Pay.
+ * Database schema and migrations definition for Ecomdev.
  * Uses SQLite STRICT tables, foreign keys with ON DELETE RESTRICT, and check constraints.
  */
 

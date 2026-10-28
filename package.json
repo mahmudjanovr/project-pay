@@ -1,7 +1,7 @@
 {
-  "name": "project-pay",
+  "name": "ecomdev",
   "version": "1.0.0",
-  "description": "Project Pay — Financial operations system for a training center",
+  "description": "Ecomdev — Financial operations system for a training center",
   "type": "module",
   "main": "src/index.js",
   "scripts": {

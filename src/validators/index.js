@@ -1,5 +1,5 @@
 /**
- * Validation utilities and Zod schemas for Project Pay.
+ * Validation utilities and Zod schemas for Ecomdev.
  * Enforces strict financial and temporal data integrity rules.
  */
 
@@ -190,6 +190,13 @@ export const enrollmentDateSchema = z.string({
   .regex(/^\d{4}-(0[1-9]|1[0-2])(-([0-2][0-9]|3[01]))?$/, {
     message: 'Enrollment date must be in YYYY-MM or YYYY-MM-DD format'
   })
+  .refine((val) => {
+    if (!val) return true;
+    if (val.length === 10) return isValidCalendarDate(val);
+    return isValidReportMonth(val);
+  }, {
+    message: 'Enrollment date must be a valid calendar date'
+  })
   .nullable()
   .transform((val) => (val === null || val === '' ? null : val));
 
@@ -269,10 +276,10 @@ export function validateGroupName(name) {
 }
 
 /**
- * Validates payment status ('pending' or 'confirmed').
+ * Validates payment status ('pending', 'confirmed', or 'rejected').
  */
-export const paymentStatusSchema = z.enum(['pending', 'confirmed'], {
-  message: "Payment status must be 'pending' or 'confirmed'"
+export const paymentStatusSchema = z.enum(['pending', 'confirmed', 'rejected'], {
+  message: "Payment status must be 'pending', 'confirmed', or 'rejected'"
 });
 
 /**

@@ -1,5 +1,5 @@
 /**
- * Server entry point for Project Pay.
+ * Server entry point for Ecomdev.
  * Starts the HTTP listener using PORT environment variable (default: 3000).
  */
 
@@ -12,7 +12,7 @@ export const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 export const DB_PATH = process.env.DATABASE_PATH || 'project_pay.db';
 
 /**
- * Starts the Project Pay server and listener.
+ * Starts the Ecomdev server and listener.
  *
  * @param {number} [port=PORT]
  * @param {string} [dbPath=DB_PATH]
@@ -27,7 +27,7 @@ export function startServer(port = PORT, dbPath = DB_PATH) {
   const server = app.listen(port, () => {
     const addr = server.address();
     const boundPort = typeof addr === 'object' && addr ? addr.port : port;
-    console.log(`Project Pay server running on port ${boundPort}`);
+    console.log(`Ecomdev server running on port ${boundPort}`);
   });
 
   return { app, server, db };

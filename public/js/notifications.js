@@ -1,5 +1,5 @@
 /**
- * Toast notifications manager for Project Pay.
+ * Toast notifications manager for Ecomdev.
  */
 
 import { el, clearElement } from './dom.js';

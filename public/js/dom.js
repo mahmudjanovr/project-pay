@@ -1,5 +1,5 @@
 /**
- * Safe DOM construction helpers for Project Pay.
+ * Safe DOM construction helpers for Ecomdev.
  * Strictly uses document.createElement and textContent to eliminate XSS risks.
  */
 

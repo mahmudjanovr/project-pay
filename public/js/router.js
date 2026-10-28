@@ -1,5 +1,5 @@
 /**
- * Client-Side Hash Router for Project Pay.
+ * Client-Side Hash Router for Ecomdev.
  * Maps hash URLs to views and updates active navigation state.
  */
 

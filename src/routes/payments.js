@@ -3,7 +3,7 @@
  */
 
 import { Router } from 'express';
-import { createPayment, confirmPayment, getPaymentById } from '../services/payments.js';
+import { createPayment, confirmPayment, rejectPayment, getPaymentById } from '../services/payments.js';
 import { getStudentById } from '../services/students.js';
 import { getReceiptByPaymentId, generateReceiptPdfBuffer } from '../services/receipts.js';
 import { validatePaymentInput, parseRouteId } from '../validators/index.js';
@@ -70,6 +70,37 @@ export function createPaymentRouter(db) {
       const result = confirmPayment(db, paymentId);
       res.status(200).json(result);
     } catch (err) {
+      if (err.statusCode === 400) {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: err.message
+        });
+      }
+      next(err);
+    }
+  });
+
+  // POST /api/payments/:id/reject - Reject a pending payment
+  router.post('/:id/reject', (req, res, next) => {
+    try {
+      const paymentId = parseRouteId(req.params.id);
+      const existing = getPaymentById(db, paymentId);
+      if (!existing) {
+        return res.status(404).json({
+          error: 'Not Found',
+          message: `Payment with ID ${paymentId} not found`
+        });
+      }
+
+      const rejected = rejectPayment(db, paymentId);
+      res.status(200).json(rejected);
+    } catch (err) {
+      if (err.statusCode === 400) {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: err.message
+        });
+      }
       next(err);
     }
   });

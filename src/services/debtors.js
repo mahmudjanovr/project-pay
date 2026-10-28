@@ -1,10 +1,10 @@
 /**
- * Monthly debtor calculation service for Project Pay.
+ * Monthly debtor calculation service for Ecomdev.
  * Identifies students with outstanding debt for a given calendar month using strictly parameterized SQL.
  */
 
 import { validateReportMonth } from '../validators/index.js';
-import { getMonthDateRange } from '../utils/date.js';
+import { getMonthDateRange, EFFECTIVE_ENROLLMENT_MONTH_SQL } from '../utils/date.js';
 
 export const MONTHLY_DEBTORS_QUERY = `
   SELECT
@@ -35,7 +35,7 @@ export const MONTHLY_DEBTORS_QUERY = `
     GROUP BY student_id
   ) p ON s.id = p.student_id
   WHERE s.monthly_fee > 0
-    AND (s.enrollment_date IS NULL OR substr(s.enrollment_date, 1, 7) <= ?)
+    AND (${EFFECTIVE_ENROLLMENT_MONTH_SQL}) <= ?
     AND COALESCE(p.total_paid, 0) < s.monthly_fee
   ORDER BY s.id ASC;
 `;

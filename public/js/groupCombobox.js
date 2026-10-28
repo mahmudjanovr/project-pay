@@ -1,5 +1,5 @@
 /**
- * Accessible Searchable Group Combobox Component for Project Pay.
+ * Accessible Searchable Group Combobox Component for Ecomdev.
  * Provides instant filtering, keyboard navigation, clear selected state,
  * and support for "Guruhsiz" (unassigned) selection.
  */

@@ -111,6 +111,12 @@ export function confirmPayment(db, paymentId) {
       throw error;
     }
 
+    if (payment.status === 'rejected') {
+      const error = new Error(`Cannot confirm a rejected payment with ID ${validId}`);
+      error.statusCode = 400;
+      throw error;
+    }
+
     const receipt = createReceiptForPayment(db, validId);
     const updatedPayment = db.prepare('SELECT * FROM payments WHERE id = ?').get(validId);
 
@@ -121,6 +127,43 @@ export function confirmPayment(db, paymentId) {
   });
 
   return runConfirm();
+}
+
+/**
+ * Rejects a pending payment inside a transaction.
+ * Confirmed payments with issued receipts cannot be rejected.
+ * Idempotent: repeated calls on an already rejected payment return the payment.
+ *
+ * @param {import('better-sqlite3').Database} db
+ * @param {number} paymentId
+ * @returns {Object}
+ */
+export function rejectPayment(db, paymentId) {
+  const validId = idSchema.parse(paymentId);
+
+  const runReject = db.transaction(() => {
+    const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(validId);
+    if (!payment) {
+      const error = new Error(`Payment with ID ${validId} not found`);
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (payment.status === 'confirmed') {
+      const error = new Error(`Cannot reject already confirmed payment with ID ${validId}`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (payment.status === 'rejected') {
+      return payment;
+    }
+
+    db.prepare("UPDATE payments SET status = 'rejected' WHERE id = ?").run(validId);
+    return db.prepare('SELECT * FROM payments WHERE id = ?').get(validId);
+  });
+
+  return runReject();
 }
 
 /**

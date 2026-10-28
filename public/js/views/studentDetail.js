@@ -1,10 +1,10 @@
 /**
- * Student Details & Payment History View for Project Pay.
+ * Student Details & Payment History View for Ecomdev.
  * Shows student profile, payment history, confirmation statuses,
  * stable PDF receipts download, and month/year filtering.
  */
 
-import { fetchStudent, fetchStudentPayments, fetchGroups, confirmPayment } from '../api.js';
+import { fetchStudent, fetchStudentPayments, fetchGroups, confirmPayment, rejectPayment } from '../api.js';
 import { formatUzbekSom, formatDate, formatMonthName } from '../formatters.js';
 import { el, clearElement } from '../dom.js';
 import { showToast } from '../notifications.js';
@@ -40,7 +40,7 @@ export async function renderStudentDetail(container, studentId) {
       if (Number.isSafeInteger(p.amount)) {
         if (p.status === 'pending') {
           pendingPaid += BigInt(p.amount);
-        } else {
+        } else if (p.status !== 'rejected') {
           confirmedPaid += BigInt(p.amount);
         }
       }
@@ -205,6 +205,11 @@ function renderPaymentsTable(payments, student, onRefresh) {
           className: 'badge',
           style: 'background: rgba(245, 158, 11, 0.2); color: var(--status-warning); font-size: 0.75rem;'
         }, 'Kutilmoqda');
+      } else if (p.status === 'rejected') {
+        statusBadge = el('span', {
+          className: 'badge',
+          style: 'background: rgba(239, 68, 68, 0.2); color: var(--status-danger); font-size: 0.75rem;'
+        }, 'Rad etilgan');
       } else {
         statusBadge = el('span', {
           className: 'badge',
@@ -213,7 +218,7 @@ function renderPaymentsTable(payments, student, onRefresh) {
       }
 
       // Actions cell
-      const actionsCell = el('td', { className: 'col-actions' });
+      const actionsCell = el('td', { className: 'col-actions', style: 'display: flex; gap: var(--space-2); align-items: center;' });
       if (isPending) {
         const confirmBtn = el('button', {
           type: 'button',
@@ -232,8 +237,28 @@ function renderPaymentsTable(payments, student, onRefresh) {
             }
           }
         }, 'Tasdiqlash');
+
+        const rejectBtn = el('button', {
+          type: 'button',
+          className: 'btn btn-danger-outline btn-sm',
+          onClick: async () => {
+            rejectBtn.disabled = true;
+            rejectBtn.textContent = 'Rad etilmoqda...';
+            try {
+              await rejectPayment(p.id);
+              showToast('To\'lov rad etildi!', 'success');
+              if (typeof onRefresh === 'function') onRefresh();
+            } catch (rErr) {
+              rejectBtn.disabled = false;
+              rejectBtn.textContent = 'Rad etish';
+              showToast(rErr.message || 'Rad etishda xatolik yuz berdi.', 'error');
+            }
+          }
+        }, 'Rad etish');
+
         actionsCell.appendChild(confirmBtn);
-      } else if (p.receipt_id) {
+        actionsCell.appendChild(rejectBtn);
+      } else if (p.status === 'confirmed' && p.receipt_id) {
         const pdfLink = el('a', {
           href: `/api/receipts/${p.receipt_id}/pdf`,
           target: '_blank',

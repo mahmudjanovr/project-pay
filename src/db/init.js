@@ -1,5 +1,5 @@
 /**
- * Database initialization and migration runner for Project Pay.
+ * Database initialization and migration runner for Ecomdev.
  * Safe, idempotent, and repeatable without data destruction or demo data insertion.
  */
 

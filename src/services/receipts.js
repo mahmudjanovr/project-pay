@@ -1,5 +1,5 @@
 /**
- * Receipt generation and persistence service for Project Pay.
+ * Receipt generation and persistence service for Ecomdev.
  * Manages unique, stable receipt records and PDF generation using PDFKit.
  */
 
@@ -101,6 +101,12 @@ export function createReceiptForPayment(db, paymentId) {
     if (!payment) {
       const error = new Error(`Payment with ID ${paymentId} not found`);
       error.statusCode = 404;
+      throw error;
+    }
+
+    if (payment.status === 'rejected') {
+      const error = new Error(`Cannot issue receipt for rejected payment with ID ${paymentId}`);
+      error.statusCode = 400;
       throw error;
     }
 
@@ -208,7 +214,7 @@ export function generateReceiptPdfBuffer(receipt) {
     doc.rect(0, 0, doc.page.width, 70).fill('#1e293b');
 
     doc.fillColor('#ffffff').fontSize(18).font('Helvetica-Bold')
-       .text('PROJECT PAY', 36, 20);
+       .text('ECOMDEV', 36, 20);
     doc.fontSize(10).font('Helvetica')
        .text('Moliya va To\'lovlar Boshqaruvi Markazi', 36, 42);
 
@@ -236,6 +242,7 @@ export function generateReceiptPdfBuffer(receipt) {
        .text('To\'lov Tafsilotlari', 36, detailsY);
 
     const rows = [
+      ['To\'lov ID:', `#${receipt.payment_id}`],
       ['O\'quvchi F.I.SH.:', studentName],
       ['O\'quv guruhi:', groupName],
       ['To\'lov hisoblangan oy:', billingMonthStr],
@@ -268,7 +275,7 @@ export function generateReceiptPdfBuffer(receipt) {
        .moveTo(36, footerY).lineTo(doc.page.width - 36, footerY).stroke();
 
     doc.fillColor('#94a3b8').fontSize(7.5).font('Helvetica')
-       .text('Project Pay elektron to\'lov nazorati tizimi orqali avtomatik shakllantirildi.', 36, footerY + 8, { align: 'center', width: doc.page.width - 72 });
+       .text('Ecomdev elektron to\'lov nazorati tizimi orqali avtomatik shakllantirildi.', 36, footerY + 8, { align: 'center', width: doc.page.width - 72 });
     doc.text('Ushbu kvitansiya to\'lov qabul qilinganligini tasdiqlovchi rasmiy hisob hujjati hisoblanadi.', 36, footerY + 20, { align: 'center', width: doc.page.width - 72 });
 
     doc.end();

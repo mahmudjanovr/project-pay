@@ -1,5 +1,5 @@
 /**
- * Dedicated Group Details View for Project Pay.
+ * Dedicated Group Details View for Ecomdev.
  * Displays group information, assigned students, group actions,
  * and existing registered student assignment to the group.
  */

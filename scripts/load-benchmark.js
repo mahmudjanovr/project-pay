@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Configurable Synthetic Dataset & Load/Performance Benchmark for Project Pay.
+ * Configurable Synthetic Dataset & Load/Performance Benchmark for Ecomdev.
  *
  * Safety guarantees:
  * - Always creates isolated temporary SQLite databases inside os.tmpdir().

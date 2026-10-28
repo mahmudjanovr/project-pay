@@ -1,5 +1,5 @@
 /**
- * Dashboard View for Project Pay.
+ * Dashboard View for Ecomdev.
  * Shows real summary metrics and quick shortcuts.
  */
 

@@ -1,5 +1,5 @@
 /**
- * Comprehensive Reports View for Project Pay.
+ * Comprehensive Reports View for Ecomdev.
  * Features 4 distinct views:
  * 1. Umumiy hisobot (Overall Monthly Overview)
  * 2. Guruhlar bo'yicha hisobot (Group-Level Breakdown)
@@ -197,6 +197,11 @@ function renderOverviewView(container, data, monthStr) {
       el('span', { className: 'stat-label' }, 'Jami tushum (Tasdiqlangan)'),
       el('div', { className: 'stat-value' }, formatUzbekSom(data.total_confirmed)),
       el('span', { className: 'stat-desc' }, `Yig'im ko'rsatkichi: ${data.collection_rate}%`)
+    ),
+    el('div', { className: 'stat-card' },
+      el('span', { className: 'stat-label' }, 'Kassaga kirim (Fakt)'),
+      el('div', { className: 'stat-value' }, formatUzbekSom(data.total_cash_received || 0)),
+      el('span', { className: 'stat-desc' }, 'To\'lov sanasi bo\'yicha tushum')
     ),
     el('div', { className: 'stat-card accent-amber' },
       el('span', { className: 'stat-label' }, 'Kutilayotgan to\'lovlar (Tasdiqlanmagan)'),

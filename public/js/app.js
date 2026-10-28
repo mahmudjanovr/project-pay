@@ -1,5 +1,5 @@
 /**
- * Main Frontend Application Bootstrap for Project Pay.
+ * Main Frontend Application Bootstrap for Ecomdev.
  */
 
 import { Router } from './router.js';
