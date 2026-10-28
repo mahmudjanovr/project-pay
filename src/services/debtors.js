@@ -6,22 +6,50 @@
 import { validateReportMonth } from '../validators/index.js';
 import { getMonthDateRange } from '../utils/date.js';
 
-/**
- * SQL query to calculate monthly debtors.
- * - Computes total payments for each student within [startOfMonth, endOfMonth].
- * - Debt = MAX(0, monthly_fee - total_paid).
- * - Restricts to students where total_paid < monthly_fee.
- * - Uses LEFT JOIN and COALESCE so students with no payments are retained.
- * - Integer arithmetic for financial values.
- */
 export const MONTHLY_DEBTORS_QUERY = `
   SELECT
     s.id,
     s.id AS student_id,
     s.full_name,
     s.monthly_fee,
+    s.group_id,
+    g.name AS group_name,
     COALESCE(p.total_paid, 0) AS total_paid,
-    MAX(0, s.monthly_fee - COALESCE(p.total_paid, 0)) AS debt
+    COALESCE(p.pending_paid, 0) AS pending_paid,
+    MAX(0, s.monthly_fee - COALESCE(p.total_paid, 0)) AS debt,
+    CASE
+      WHEN COALESCE(p.total_paid, 0) = 0 AND COALESCE(p.pending_paid, 0) > 0 THEN 'pending'
+      WHEN COALESCE(p.total_paid, 0) = 0 THEN 'unpaid'
+      WHEN COALESCE(p.total_paid, 0) < s.monthly_fee THEN 'partial'
+      ELSE 'paid'
+    END AS status
+  FROM students s
+  LEFT JOIN groups g ON g.id = s.group_id
+  LEFT JOIN (
+    SELECT
+      student_id,
+      SUM(CASE WHEN COALESCE(status, 'confirmed') = 'confirmed' THEN amount ELSE 0 END) AS total_paid,
+      SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END) AS pending_paid
+    FROM payments
+    WHERE COALESCE(billing_month, substr(payment_date, 1, 7)) = ?
+    GROUP BY student_id
+  ) p ON s.id = p.student_id
+  WHERE s.monthly_fee > 0
+    AND (s.enrollment_date IS NULL OR substr(s.enrollment_date, 1, 7) <= ?)
+    AND COALESCE(p.total_paid, 0) < s.monthly_fee
+  ORDER BY s.id ASC;
+`;
+
+const LEGACY_DEBTORS_QUERY = `
+  SELECT
+    s.id,
+    s.id AS student_id,
+    s.full_name,
+    s.monthly_fee,
+    COALESCE(p.total_paid, 0) AS total_paid,
+    0 AS pending_paid,
+    MAX(0, s.monthly_fee - COALESCE(p.total_paid, 0)) AS debt,
+    'unpaid' AS status
   FROM students s
   LEFT JOIN (
     SELECT
@@ -35,15 +63,38 @@ export const MONTHLY_DEBTORS_QUERY = `
   ORDER BY s.id ASC;
 `;
 
+function hasColumn(db, table, col) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+    return cols.some((c) => c.name === col);
+  } catch {
+    return false;
+  }
+}
+
 const debtorsStmtCache = new WeakMap();
 
 function getDebtorsStmt(db) {
-  let stmt = debtorsStmtCache.get(db);
-  if (!stmt) {
-    stmt = db.prepare(MONTHLY_DEBTORS_QUERY);
-    debtorsStmtCache.set(db, stmt);
+  let cached = debtorsStmtCache.get(db);
+  if (!cached) {
+    const supportsBillingMonth = hasColumn(db, 'payments', 'billing_month');
+    const supportsGroups = hasColumn(db, 'students', 'group_id');
+    const supportsEnrollment = hasColumn(db, 'students', 'enrollment_date');
+
+    if (supportsBillingMonth && supportsGroups && supportsEnrollment) {
+      cached = {
+        stmt: db.prepare(MONTHLY_DEBTORS_QUERY),
+        type: 'modern'
+      };
+    } else {
+      cached = {
+        stmt: db.prepare(LEGACY_DEBTORS_QUERY),
+        type: 'legacy'
+      };
+    }
+    debtorsStmtCache.set(db, cached);
   }
-  return stmt;
+  return cached;
 }
 
 /**
@@ -56,19 +107,26 @@ function getDebtorsStmt(db) {
  *   student_id: number,
  *   full_name: string,
  *   monthly_fee: number,
+ *   group_id?: number|null,
+ *   group_name?: string|null,
  *   total_paid: number,
- *   debt: number
+ *   pending_paid?: number,
+ *   debt: number,
+ *   status?: string
  * }>}
  */
 export function getMonthlyDebtors(db, reportMonth) {
-  // Validate report month format and calendar range
   const validMonth = validateReportMonth(reportMonth);
-  const { startOfMonth, endOfMonth } = getMonthDateRange(validMonth);
+  const { stmt, type } = getDebtorsStmt(db);
 
-  const stmt = getDebtorsStmt(db);
   let rows;
   try {
-    rows = stmt.all(startOfMonth, endOfMonth);
+    if (type === 'modern') {
+      rows = stmt.all(validMonth, validMonth);
+    } else {
+      const { startOfMonth, endOfMonth } = getMonthDateRange(validMonth);
+      rows = stmt.all(startOfMonth, endOfMonth);
+    }
   } catch (err) {
     if (err && typeof err.message === 'string' && err.message.toLowerCase().includes('integer overflow')) {
       throw new RangeError('Financial calculation overflow detected during monthly payment aggregation.');

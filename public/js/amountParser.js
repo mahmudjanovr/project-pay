@@ -1,20 +1,14 @@
-/**
- * Financial Amount Parsing and Validation Utility for Project Pay.
- * Strict parser for UZS monetary amounts supporting plain digits, comma-separated thousands,
- * and space-separated thousands, while strictly rejecting decimals, zero, negatives, and malformed separators.
- */
+
 
 import { formatUzbekSom } from './formatters.js';
 
-// Regex for pure integer digits without separators (1 or more digits)
+
 const PURE_DIGITS_REGEX = /^\d+$/;
 
-// Regex for standard comma-grouped thousands: 1-3 digits followed by groups of exactly 3 digits
-// e.g. 1,000; 120,000; 1,200,000
+
 const COMMA_GROUPED_REGEX = /^[1-9]\d{0,2}(,\d{3})+$/;
 
-// Regex for space-grouped thousands: 1-3 digits followed by groups of exactly 3 digits
-// e.g. 1 000; 120 000; 1 200 000 (supports space, NBSP \u00A0, and narrow NBSP \u202F)
+
 const SPACE_GROUPED_REGEX = /^[1-9]\d{0,2}([ \u00A0\u202F]\d{3})+$/;
 
 /**
@@ -44,7 +38,7 @@ function parseUzsIntegerAmount(input, { allowZero, emptyError, minError, decimal
     return { valid: false, error: digitsOnlyError };
   }
 
-  // Convert input to string and trim leading/trailing whitespace
+ 
   const raw = String(input).trim();
 
   if (raw === '') {

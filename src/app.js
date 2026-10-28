@@ -12,6 +12,7 @@ import { initDatabase } from './db/init.js';
 import { createStudentRouter } from './routes/students.js';
 import { createGroupRouter } from './routes/groups.js';
 import { createPaymentRouter } from './routes/payments.js';
+import { createReceiptRouter } from './routes/receipts.js';
 import { createReportRouter, createDebtorsHandler } from './routes/reports.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -42,6 +43,7 @@ export function createApp(database) {
   app.use('/api/students', createStudentRouter(db));
   app.use('/api/groups', createGroupRouter(db));
   app.use('/api/payments', createPaymentRouter(db));
+  app.use('/api/receipts', createReceiptRouter(db));
   app.use('/api/reports', createReportRouter(db));
 
   // Required top-level debtor report endpoint: GET /debtors?month=YYYY-MM

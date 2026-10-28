@@ -2,7 +2,7 @@
  * Toast notifications manager for Project Pay.
  */
 
-import { el } from './dom.js';
+import { el, clearElement } from './dom.js';
 
 let container = null;
 
@@ -22,6 +22,16 @@ function getContainer() {
 }
 
 /**
+ * Dismisses all active toast notifications immediately.
+ */
+export function dismissAllToasts() {
+  const toastContainer = getContainer();
+  if (toastContainer) {
+    clearElement(toastContainer);
+  }
+}
+
+/**
  * Displays a toast notification on screen.
  *
  * @param {string} message - User-facing message.
@@ -30,6 +40,13 @@ function getContainer() {
  */
 export function showToast(message, type = 'info', title = null) {
   const toastContainer = getContainer();
+
+  // Cap at 3 visible toasts to prevent vertical screen overflow
+  while (toastContainer.children && toastContainer.children.length >= 3) {
+    const first = toastContainer.firstElementChild || toastContainer.children[0];
+    if (!first) break;
+    toastContainer.removeChild(first);
+  }
 
   const typeTitles = {
     success: 'Muvaffaqiyatli',
@@ -70,8 +87,8 @@ export function showToast(message, type = 'info', title = null) {
     }, 200);
   }
 
-  // Auto-dismiss after 4 seconds
-  timer = setTimeout(dismiss, 4000);
+  // Auto-dismiss after 3.5 seconds
+  timer = setTimeout(dismiss, 3500);
 
   toastContainer.appendChild(toast);
 }

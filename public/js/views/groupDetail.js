@@ -1,15 +1,22 @@
 /**
  * Dedicated Group Details View for Project Pay.
  * Displays group information, assigned students, group actions,
- * and quick student addition with this group preselected.
+ * and existing registered student assignment to the group.
  */
 
-import { fetchGroup, fetchGroupStudents, fetchGroups, updateStudent } from '../api.js';
+import {
+  fetchGroup,
+  fetchGroupStudents,
+  fetchGroups,
+  fetchStudents,
+  assignStudentsToGroup,
+  updateStudent
+} from '../api.js';
 import { formatUzbekSom, formatDate } from '../formatters.js';
 import { el, clearElement } from '../dom.js';
 import { showToast } from '../notifications.js';
 import { openModal, closeModal } from '../modal.js';
-import { showAddStudentModal, showEditStudentModal } from './students.js';
+import { showEditStudentModal } from './students.js';
 import { showEditGroupModal, confirmDeleteGroup } from './groups.js';
 import { createPageShell, renderStateView } from '../pageLayout.js';
 
@@ -75,12 +82,12 @@ export async function renderGroupDetail(container, groupId, queryParams = new UR
       el('div', { className: 'page-actions', style: 'display: flex; gap: var(--space-2); flex-wrap: wrap;' },
         el('button', {
           type: 'button',
+          id: 'btn-group-add-student',
           className: 'btn btn-primary',
-          title: 'Ushbu guruhga yangi o\'quvchi qo\'shish',
-          onClick: () => showAddStudentModal(
-            allGroups,
-            () => renderGroupDetail(container, numericGroupId),
-            group.id
+          title: 'Mavjud o\'quvchilarni ushbu guruhga biriktirish',
+          onClick: () => showAssignExistingStudentsModal(
+            group,
+            () => renderGroupDetail(container, numericGroupId)
           )
         }, '+ Guruhga o\'quvchi qo\'shish'),
         el('button', {
@@ -149,12 +156,11 @@ export async function renderGroupDetail(container, groupId, queryParams = new UR
     });
     container.appendChild(shell.element);
 
-    // Auto-open add student modal if query parameter action=add_student is passed
+    // Auto-open assignment modal if query parameter action=add_student is passed
     if (queryParams.get('action') === 'add_student') {
-      showAddStudentModal(
-        allGroups,
-        () => renderGroupDetail(container, numericGroupId),
-        group.id
+      showAssignExistingStudentsModal(
+        group,
+        () => renderGroupDetail(container, numericGroupId)
       );
     }
 
@@ -167,6 +173,235 @@ export async function renderGroupDetail(container, groupId, queryParams = new UR
           href: '#/groups',
           className: 'btn btn-secondary btn-sm'
         }, '← Guruhlar ro\'yxatiga qaytish')
+      )
+    );
+  }
+}
+
+/**
+ * Modal to select and assign existing registered students to a group.
+ * Does NOT open new student registration form.
+ *
+ * @param {Object} group
+ * @param {() => void} onRefresh
+ */
+export async function showAssignExistingStudentsModal(group, onRefresh) {
+  const modalBody = el('div', { style: 'min-height: 250px;' },
+    el('div', { className: 'loading-indicator' },
+      el('div', { className: 'spinner' }),
+      el('p', {}, 'Mavjud o\'quvchilar ro\'yxati yuklanmoqda...')
+    )
+  );
+
+  const errorBox = el('div', {
+    className: 'form-error',
+    style: 'display: none; margin-bottom: var(--space-3);'
+  });
+
+  const countBadge = el('span', {
+    style: 'font-size: 0.875rem; color: var(--text-secondary); margin-right: auto;'
+  }, 'Tanlandi: 0 nafar');
+
+  const submitBtn = el('button', {
+    type: 'button',
+    className: 'btn btn-primary',
+    disabled: true,
+    id: 'btn-assign-students-submit'
+  }, 'Biriktirish (0 ta)');
+
+  const footer = el('div', {
+    style: 'display: flex; gap: var(--space-3); align-items: center; justify-content: flex-end; width: 100%;'
+  },
+    countBadge,
+    el('button', {
+      type: 'button',
+      className: 'btn btn-secondary',
+      onClick: closeModal
+    }, 'Bekor qilish'),
+    submitBtn
+  );
+
+  openModal({
+    title: `Guruhga mavjud o'quvchilarni biriktirish: ${group.name}`,
+    body: el('div', {}, errorBox, modalBody),
+    footer
+  });
+
+  try {
+    const allStudents = await fetchStudents();
+    clearElement(modalBody);
+
+    if (allStudents.length === 0) {
+      modalBody.appendChild(
+        el('div', { className: 'empty-state' },
+          el('div', { className: 'empty-state-icon' }, '👥'),
+          el('h3', { className: 'empty-state-title' }, 'Tizimda o\'quvchilar mavjud emas'),
+          el('p', { className: 'empty-state-description' },
+            'Avval "O\'quvchilar" bo\'limida o\'quvchilarni ro\'yxatdan o\'tkazing.'
+          )
+        )
+      );
+      return;
+    }
+
+    const selectedStudentIds = new Set();
+    let filterQuery = '';
+
+    // Search Input
+    const searchInput = el('input', {
+      type: 'search',
+      className: 'form-input',
+      id: 'assign-student-search',
+      placeholder: 'O\'quvchi F.I.SH. yoki telefon raqami bo\'yicha qidirish...',
+      style: 'margin-bottom: var(--space-3);',
+      onInput: (e) => {
+        filterQuery = (e.target.value || '').trim().toLowerCase();
+        renderStudentList();
+      }
+    });
+
+    const listContainer = el('div', {
+      className: 'table-container',
+      style: 'max-height: 340px; overflow-y: auto; border: 1px solid var(--border-light); border-radius: var(--radius-md);'
+    });
+
+    modalBody.appendChild(searchInput);
+    modalBody.appendChild(listContainer);
+
+    function updateCounter() {
+      const count = selectedStudentIds.size;
+      countBadge.textContent = `Tanlandi: ${count} nafar`;
+      submitBtn.textContent = `Biriktirish (${count} ta)`;
+      submitBtn.disabled = count === 0;
+    }
+
+    function renderStudentList() {
+      clearElement(listContainer);
+
+      const filtered = allStudents.filter((s) => {
+        if (!filterQuery) return true;
+        const nameMatch = s.full_name && s.full_name.toLowerCase().includes(filterQuery);
+        const phoneMatch = s.phone && s.phone.toLowerCase().includes(filterQuery);
+        return nameMatch || phoneMatch;
+      });
+
+      if (filtered.length === 0) {
+        listContainer.appendChild(
+          el('div', { style: 'padding: var(--space-6); text-align: center; color: var(--text-muted); font-size: 0.875rem;' },
+            'Qidiruv natijasida hech qanday o\'quvchi topilmadi.'
+          )
+        );
+        return;
+      }
+
+      const rows = filtered.map((student) => {
+        const isCurrentGroup = student.group_id === group.id;
+        const hasOtherGroup = student.group_id && student.group_id !== group.id;
+
+        const checkbox = el('input', {
+          type: 'checkbox',
+          className: 'assign-student-checkbox',
+          disabled: isCurrentGroup,
+          checked: isCurrentGroup || selectedStudentIds.has(student.id),
+          onChange: (e) => {
+            if (e.target.checked) {
+              selectedStudentIds.add(student.id);
+            } else {
+              selectedStudentIds.delete(student.id);
+            }
+            updateCounter();
+          }
+        });
+
+        let groupBadge;
+        if (isCurrentGroup) {
+          groupBadge = el('span', {
+            className: 'badge',
+            style: 'background: rgba(59, 130, 246, 0.15); color: var(--accent-primary); font-size: 0.75rem;'
+          }, 'Joriy guruhda');
+        } else if (hasOtherGroup) {
+          groupBadge = el('span', {
+            className: 'badge',
+            style: 'background: rgba(245, 158, 11, 0.15); color: var(--status-warning); font-size: 0.75rem;'
+          }, `Guruh: ${student.group_name}`);
+        } else {
+          groupBadge = el('span', {
+            className: 'badge',
+            style: 'background: rgba(148, 163, 184, 0.15); color: var(--text-muted); font-size: 0.75rem;'
+          }, 'Guruhsiz');
+        }
+
+        const tr = el('tr', {
+          style: isCurrentGroup ? 'opacity: 0.6; background-color: var(--bg-surface);' : 'cursor: pointer;',
+          onClick: (e) => {
+            if (isCurrentGroup) return;
+            if (e.target.tagName !== 'INPUT') {
+              checkbox.checked = !checkbox.checked;
+              checkbox.dispatchEvent(new Event('change'));
+            }
+          }
+        },
+          el('td', { style: 'width: 38px; text-align: center;' }, checkbox),
+          el('td', { style: 'font-weight: 500;' },
+            el('div', {}, student.full_name),
+            student.phone ? el('small', { style: 'color: var(--text-muted); font-size: 0.8125rem;' }, student.phone) : null
+          ),
+          el('td', { className: 'col-numeric' }, formatUzbekSom(student.monthly_fee)),
+          el('td', {}, groupBadge)
+        );
+
+        return tr;
+      });
+
+      const table = el('table', { className: 'data-table', style: 'margin: 0;' },
+        el('thead', {},
+          el('tr', {},
+            el('th', { style: 'width: 38px;' }, ''),
+            el('th', {}, 'F.I.SH. va telefon'),
+            el('th', { className: 'col-numeric' }, 'Oylik to\'lov'),
+            el('th', {}, 'Joriy holati')
+          )
+        ),
+        el('tbody', {}, ...rows)
+      );
+
+      listContainer.appendChild(table);
+    }
+
+    renderStudentList();
+
+    // Setup submit handler with double-click protection
+    let isSubmitting = false;
+    submitBtn.onclick = async () => {
+      if (isSubmitting || selectedStudentIds.size === 0) return;
+      isSubmitting = true;
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Biriktirilmoqda...';
+      errorBox.style.display = 'none';
+
+      try {
+        const idsToAssign = Array.from(selectedStudentIds);
+        await assignStudentsToGroup(group.id, idsToAssign);
+        closeModal();
+        showToast(
+          `${idsToAssign.length} nafar o'quvchi "${group.name}" guruhiga muvaffaqiyatli biriktirildi!`,
+          'success'
+        );
+        onRefresh();
+      } catch (err) {
+        isSubmitting = false;
+        submitBtn.disabled = false;
+        submitBtn.textContent = `Biriktirish (${selectedStudentIds.size} ta)`;
+        errorBox.textContent = err.message || 'O\'quvchilarni guruhga biriktirishda xatolik yuz berdi.';
+        errorBox.style.display = 'block';
+      }
+    };
+
+  } catch (err) {
+    clearElement(modalBody);
+    modalBody.appendChild(
+      el('div', { className: 'error-banner' },
+        el('span', {}, err.message || 'O\'quvchilar ro\'yxatini yuklashda xatolik yuz berdi.')
       )
     );
   }
@@ -187,12 +422,12 @@ function renderGroupStudentsTable(students, group, allGroups, onRefresh) {
       el('div', { className: 'empty-state-icon' }, '👥'),
       el('h3', { className: 'empty-state-title' }, 'Ushbu guruhda hozircha o\'quvchilar yo\'q'),
       el('p', { className: 'empty-state-description' },
-        'Guruhga yangi o\'quvchi qo\'shing yoki mavjud o\'quvchilarni tahrirlash orqali ushbu guruhga biriktiring.'
+        'Guruhga mavjud o\'quvchilarni biriktirish uchun quyidagi tugmani bosing.'
       ),
       el('button', {
         type: 'button',
         className: 'btn btn-primary btn-sm',
-        onClick: () => showAddStudentModal(allGroups, onRefresh, group.id)
+        onClick: () => showAssignExistingStudentsModal(group, onRefresh)
       }, '+ O\'quvchi qo\'shish')
     );
   }

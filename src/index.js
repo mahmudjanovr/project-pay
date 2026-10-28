@@ -14,6 +14,7 @@ export {
   paymentAmountSchema,
   paymentDateSchema,
   reportMonthSchema,
+  billingMonthSchema,
   groupNameSchema,
   groupIdSchema,
   idSchema,
@@ -35,7 +36,8 @@ export {
   validateMonthlyFee,
   validatePaymentAmount,
   validatePaymentDate,
-  validateReportMonth
+  validateReportMonth,
+  validateBillingMonth
 } from './validators/index.js';
 
 export {

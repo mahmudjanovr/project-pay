@@ -4,7 +4,7 @@
  */
 
 import { fetchStudents, fetchGroups, createStudent, updateStudent, deleteStudent } from '../api.js';
-import { formatUzbekSom, formatDate } from '../formatters.js';
+import { formatUzbekSom, formatDate, getCurrentLocalDateString } from '../formatters.js';
 import { parseMonthlyFee } from '../amountParser.js';
 import { el, clearElement } from '../dom.js';
 import { openModal, closeModal } from '../modal.js';
@@ -357,6 +357,13 @@ export function showAddStudentModal(groups, onSuccess, defaultGroupId = null) {
     id: 'add-student-fee'
   });
 
+  const enrollmentInput = el('input', {
+    type: 'date',
+    id: 'add-student-enrollment',
+    className: 'form-input',
+    value: getCurrentLocalDateString()
+  });
+
   const groupCombobox = createGroupCombobox({
     groups,
     preselectedGroupId: defaultGroupId,
@@ -413,7 +420,8 @@ export function showAddStudentModal(groups, onSuccess, defaultGroupId = null) {
           full_name: fullName,
           phone: phoneVal,
           monthly_fee: feeResult.value,
-          group_id: groupIdVal
+          group_id: groupIdVal,
+          enrollment_date: enrollmentInput.value || null
         });
         groupCombobox.destroy();
         closeModal();
@@ -448,6 +456,11 @@ export function showAddStudentModal(groups, onSuccess, defaultGroupId = null) {
       }, 'Guruh'),
       groupCombobox.element,
       el('span', { className: 'form-help' }, 'O\'quvchi biriktiriladigan guruhni tanlang yoki qidiring (ixtiyoriy).')
+    ),
+    el('div', { className: 'form-group' },
+      el('label', { className: 'form-label', for: 'add-student-enrollment' }, 'O\'qishga qabul sanasi'),
+      enrollmentInput,
+      el('span', { className: 'form-help' }, 'Ushbu oydan boshlab o\'quvchiga oylik to\'lov majburiyati yuklanadi.')
     ),
     errorBox,
     el('div', { className: 'modal-footer', style: 'padding: var(--space-4) 0 0 0; background: none; border: none;' },
@@ -512,6 +525,13 @@ export function showEditStudentModal(student, groups, onSuccess) {
     initialValue: student.monthly_fee
   });
 
+  const enrollmentInput = el('input', {
+    type: 'date',
+    id: `${comboboxId}-enrollment`,
+    className: 'form-input',
+    value: student.enrollment_date || (student.created_at ? student.created_at.slice(0, 10) : getCurrentLocalDateString())
+  });
+
   const groupCombobox = createGroupCombobox({
     groups,
     preselectedGroupId: student.group_id,
@@ -568,7 +588,8 @@ export function showEditStudentModal(student, groups, onSuccess) {
           full_name: fullName,
           phone: phoneVal,
           monthly_fee: feeResult.value,
-          group_id: groupIdVal
+          group_id: groupIdVal,
+          enrollment_date: enrollmentInput.value || null
         });
         groupCombobox.destroy();
         closeModal();
@@ -603,6 +624,11 @@ export function showEditStudentModal(student, groups, onSuccess) {
       }, 'Guruh'),
       groupCombobox.element,
       el('span', { className: 'form-help' }, 'O\'quvchi biriktiriladigan guruhni tanlang yoki qidiring.')
+    ),
+    el('div', { className: 'form-group' },
+      el('label', { className: 'form-label', for: `${comboboxId}-enrollment` }, 'O\'qishga qabul sanasi'),
+      enrollmentInput,
+      el('span', { className: 'form-help' }, 'Ushbu oydan boshlab o\'quvchiga oylik to\'lov majburiyati yuklanadi.')
     ),
     errorBox,
     el('div', { className: 'modal-footer', style: 'padding: var(--space-4) 0 0 0; background: none; border: none;' },

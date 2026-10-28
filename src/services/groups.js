@@ -205,3 +205,55 @@ export function getStudentsByGroupId(db, groupId) {
   const { studentsByGroup } = getGroupStmts(db);
   return studentsByGroup.all(validId);
 }
+
+/**
+ * Assigns one or more existing students to a specific group.
+ * Atomic and transactional.
+ *
+ * @param {import('better-sqlite3').Database} db
+ * @param {number} groupId
+ * @param {Array<number>} studentIds
+ * @returns {{ success: boolean, count: number, group_id: number }}
+ */
+export function assignStudentsToGroup(db, groupId, studentIds) {
+  const validGroupId = idSchema.parse(groupId);
+  if (!Array.isArray(studentIds) || studentIds.length === 0) {
+    throw new Error("Kamida bitta o'quvchi tanlanishi lozim");
+  }
+
+  const validStudentIds = studentIds.map((id) => idSchema.parse(id));
+
+  const runAssign = db.transaction(() => {
+    const group = getGroupById(db, validGroupId);
+    if (!group) {
+      const err = new Error(`Group with ID ${validGroupId} not found`);
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const checkStudent = db.prepare('SELECT id, full_name FROM students WHERE id = ?');
+    const updateStudentStmt = db.prepare('UPDATE students SET group_id = ? WHERE id = ?');
+
+    let assignedCount = 0;
+    for (const sId of validStudentIds) {
+      const student = checkStudent.get(sId);
+      if (!student) {
+        const err = new Error(`Student with ID ${sId} not found`);
+        err.statusCode = 404;
+        throw err;
+      }
+      const info = updateStudentStmt.run(validGroupId, sId);
+      if (info.changes > 0) {
+        assignedCount += 1;
+      }
+    }
+
+    return {
+      success: true,
+      count: assignedCount,
+      group_id: validGroupId
+    };
+  });
+
+  return runAssign();
+}

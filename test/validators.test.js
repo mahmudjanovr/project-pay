@@ -7,6 +7,7 @@ import {
   paymentAmountSchema,
   paymentDateSchema,
   reportMonthSchema,
+  billingMonthSchema,
   createStudentSchema,
   createPaymentSchema,
   validateStudentInput,
@@ -15,7 +16,8 @@ import {
   validateMonthlyFee,
   validatePaymentAmount,
   validatePaymentDate,
-  validateReportMonth
+  validateReportMonth,
+  validateBillingMonth
 } from '../src/validators/index.js';
 
 import {
@@ -203,6 +205,31 @@ test('Report month validation', async (t) => {
   });
 });
 
+test('Billing month validation (billingMonthSchema)', async (t) => {
+  await t.test('accepts valid YYYY-MM months with trim', () => {
+    assert.equal(validateBillingMonth('2026-01'), '2026-01');
+    assert.equal(validateBillingMonth('2026-09'), '2026-09');
+    assert.equal(validateBillingMonth('2026-10'), '2026-10');
+    assert.equal(validateBillingMonth('2026-12'), '2026-12');
+    assert.equal(validateBillingMonth('  2026-10  '), '2026-10');
+  });
+
+  await t.test('rejects invalid month numbers with Billing month error message', () => {
+    assert.throws(() => validateBillingMonth('2026-00'), /Billing month must be in exact YYYY-MM format/);
+    assert.throws(() => validateBillingMonth('2026-13'), /Billing month must be in exact YYYY-MM format/);
+  });
+
+  await t.test('rejects non-canonical formats and non-strings', () => {
+    assert.throws(() => validateBillingMonth('2026-9'), /Billing month/);
+    assert.throws(() => validateBillingMonth('2026/10'), /Billing month/);
+    assert.throws(() => validateBillingMonth('2026-10-01'), /Billing month/);
+    assert.throws(() => validateBillingMonth('2026'), /Billing month/);
+    assert.throws(() => validateBillingMonth(''), /Billing month/);
+    assert.throws(() => validateBillingMonth(null), /Billing month must be a string/);
+    assert.throws(() => validateBillingMonth(12345), /Billing month must be a string/);
+  });
+});
+
 test('Compound schemas: createStudentSchema, updateStudentSchema, and createPaymentSchema', async (t) => {
   await t.test('validateStudentInput accepts valid input and rejects extra or invalid fields', () => {
     const student = validateStudentInput({ full_name: '  Dilshod  ', monthly_fee: 1000000 });
@@ -237,9 +264,22 @@ test('Compound schemas: createStudentSchema, updateStudentSchema, and createPaym
     assert.equal(payment.student_id, 1);
     assert.equal(payment.amount, 500000);
     assert.equal(payment.payment_date, '2026-10-15');
+    assert.equal(payment.billing_month, undefined);
+
+    const withMonth = validatePaymentInput({
+      student_id: 1,
+      amount: 500000,
+      payment_date: '2026-10-28',
+      billing_month: '2026-09'
+    });
+    assert.equal(withMonth.billing_month, '2026-09');
 
     assert.throws(() => validatePaymentInput({ student_id: -1, amount: 500000, payment_date: '2026-10-15' }));
     assert.throws(() => validatePaymentInput({ student_id: 1, amount: 0, payment_date: '2026-10-15' }));
     assert.throws(() => validatePaymentInput({ student_id: 1, amount: 500000, payment_date: '2026-02-30' }));
+    assert.throws(
+      () => validatePaymentInput({ student_id: 1, amount: 500000, payment_date: '2026-10-15', billing_month: '2026-13' }),
+      /Billing month must be in exact YYYY-MM format/
+    );
   });
 });

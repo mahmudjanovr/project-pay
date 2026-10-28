@@ -13,9 +13,28 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
 import { startServer } from '../src/server.js';
+
+export function getFirefoxBinary() {
+  if (process.env.FIREFOX_BIN && fs.existsSync(process.env.FIREFOX_BIN)) {
+    return process.env.FIREFOX_BIN;
+  }
+  const candidates = [
+    'C:\\Program Files\\Mozilla Firefox\\firefox.exe',
+    'C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe',
+    path.join(process.env.LOCALAPPDATA || '', 'Mozilla Firefox', 'firefox.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Firefox Developer Edition', 'firefox.exe'),
+    '/usr/bin/firefox',
+    '/usr/local/bin/firefox'
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return 'firefox';
+}
 
 export class FirefoxBiDi {
   constructor() {
@@ -41,8 +60,9 @@ export class FirefoxBiDi {
       ].join('\n')
     );
 
+    const ffBinary = getFirefoxBinary();
     this.proc = spawn(
-      'firefox',
+      ffBinary,
       ['--headless', '--profile', this.profileDir, '--remote-debugging-port', '0'],
       { stdio: ['ignore', 'pipe', 'pipe'] }
     );
@@ -197,13 +217,30 @@ export class FirefoxBiDi {
   }
 
   async waitForModalOpen() {
-    await this.waitFor(
-      `(() => {
+    try {
+      await this.waitFor(
+        `(() => {
+          const ov = document.getElementById('modal-overlay');
+          return Boolean(ov && ov.classList.contains('active') && getComputedStyle(ov).opacity === '1');
+        })()`,
+        5000
+      );
+    } catch (err) {
+      const diag = await this.eval(`(() => {
         const ov = document.getElementById('modal-overlay');
-        return Boolean(ov && ov.classList.contains('active') && getComputedStyle(ov).opacity === '1');
-      })()`,
-      5000
-    );
+        return {
+          ovExists: Boolean(ov),
+          classList: ov ? Array.from(ov.classList) : [],
+          opacity: ov ? getComputedStyle(ov).opacity : null,
+          visibility: ov ? getComputedStyle(ov).visibility : null,
+          title: ov?.querySelector('.modal-title')?.textContent || null,
+          pageTitle: document.querySelector('.page-title')?.textContent || null,
+          btnPrimary: document.querySelector('.page-actions .btn-primary')?.outerHTML || null,
+          url: window.location.href
+        };
+      })()`);
+      throw new Error(`${err.message} | openDiag=${JSON.stringify(diag)} | consoleErrors=${JSON.stringify(this.consoleErrors)}`);
+    }
   }
 
   async waitForModalClosed() {
@@ -1064,6 +1101,202 @@ async function runE2E() {
     await ff.waitFor(`window.innerWidth === 1280 && document.getElementById('app-sidebar').getBoundingClientRect().left === 0`);
     completedWorkflows.push('Workflow 9: Persistent Section Headers, Controls UX & Responsive Scrolling');
 
+    // ========================================================================
+    // Workflow 10: Financial Reporting, Month Calculations, PDF Receipts & Group Assignment
+    // ========================================================================
+    // 1. Register student with enrollment date September 2026 and fee 600,000
+    await ff.navigate(`${mainCtx.baseUrl}/#/students`);
+    await ff.waitFor(`document.querySelector('.page-title')?.textContent === 'O\\'quvchilar'`);
+    await ff.clickSelector('.page-actions .btn-primary');
+    await ff.waitForModalOpen();
+    await ff.fillInput('#add-student-name', 'Dilshod Karimov');
+    await ff.fillInput('#add-student-phone', '+998 90 777 66 55');
+    await ff.fillInput('#add-student-fee', '600000');
+    await ff.fillInput('#add-student-enrollment', '2026-09-01');
+    await ff.clickSelector('#modal-overlay button[type="submit"]');
+    await ff.waitForModalClosed();
+    await ff.fillInput('.search-input', 'Dilshod');
+    await ff.waitFor(`document.getElementById('main-content')?.textContent.includes('Dilshod Karimov')`);
+
+    // 2. Debtor calculation: appears for 2026-09 with full debt, NOT for 2026-08 (prior to enrollment)
+    await ff.navigate(`${mainCtx.baseUrl}/#/reports?tab=debtors&month=2026-09`);
+    await ff.waitFor(`document.getElementById('report-month-label')?.textContent.includes('Sentabr')`);
+    await ff.waitFor(`document.getElementById('debtors-search-input') !== null`);
+    await ff.fillInput('#debtors-search-input', 'Dilshod');
+    await ff.waitFor(`document.querySelector('#report-content .data-table tbody')?.textContent.includes('Dilshod Karimov')`);
+
+    const dilshodSeptDebtor = await ff.eval(`(() => {
+      const rows = Array.from(document.querySelectorAll('#report-content .data-table tbody tr'));
+      const row = rows.find(r => r.textContent.includes('Dilshod Karimov'));
+      if (!row) return null;
+      return { text: row.textContent };
+    })()`);
+    assert.ok(dilshodSeptDebtor, 'Dilshod must be in debtors list for 2026-09');
+    assert.ok(dilshodSeptDebtor.text.replace(/\s+/g, ' ').includes('600 000'), 'Debt should be 600 000');
+
+    // Switch month to 2026-08: Dilshod should NOT appear because enrollment is 2026-09-01
+    await ff.fillInput('#debtor-month-input', '2026-08');
+    await ff.waitFor(`document.getElementById('report-month-label')?.textContent.includes('Avgust')`);
+    if (await ff.eval(`document.getElementById('debtors-search-input') !== null`)) {
+      await ff.fillInput('#debtors-search-input', 'Dilshod');
+    }
+    const dilshodAugDebtor = await ff.eval(`(() => {
+      const rows = Array.from(document.querySelectorAll('#report-content .data-table tbody tr'));
+      return rows.find(r => r.textContent.includes('Dilshod Karimov'));
+    })()`);
+    assert.ok(!dilshodAugDebtor, 'Dilshod must not appear as debtor before enrollment month');
+
+    // 3. Record pending payment for 2026-09: Outstanding debt must remain unchanged
+    await ff.navigate(`${mainCtx.baseUrl}/#/payments`);
+    await ff.waitFor(`document.getElementById('student-combobox-input') !== null`);
+    await ff.clickSelector('#student-combobox-input');
+    await ff.fillInput('#student-combobox-input', 'Dilshod Karimov');
+    await ff.pressKey('Enter');
+    await ff.waitFor(`document.getElementById('selected-student-card')?.style.display === 'flex'`);
+    await ff.fillInput('#payment-amount-input', '200000');
+    await ff.fillInput('#payment-month-input', '2026-09');
+    await ff.clickSelector('#payment-pending-btn');
+    await ff.waitFor(`document.getElementById('payment-success-banner')?.style.display === 'block'`);
+    assert.equal(
+      await ff.eval(`document.getElementById('payment-success-banner').textContent.includes('kutilayotgan')`),
+      true
+    );
+
+    // Verify September 2026 debt is STILL 600 000 (pending payment does not reduce debt)
+    await ff.navigate(`${mainCtx.baseUrl}/#/reports?tab=debtors&month=2026-09`);
+    await ff.waitFor(`document.getElementById('report-month-label')?.textContent.includes('Sentabr')`);
+    await ff.waitFor(`document.getElementById('debtors-search-input') !== null`);
+    await ff.fillInput('#debtors-search-input', 'Dilshod');
+    await ff.waitFor(`document.querySelector('#report-content .data-table tbody')?.textContent.includes('Dilshod Karimov')`);
+    const debtAfterPending = await ff.eval(`(() => {
+      const rows = Array.from(document.querySelectorAll('#report-content .data-table tbody tr'));
+      const row = rows.find(r => r.textContent.includes('Dilshod Karimov'));
+      return row ? row.textContent : '';
+    })()`);
+    assert.ok(debtAfterPending.replace(/\s+/g, ' ').includes('600 000'), 'Pending payment must not reduce outstanding debt');
+
+    // 4. Confirm pending payment from student profile: debt decreases, stable receipt created, PDF generated
+    const dilshodStudent = mainCtx.db.prepare('SELECT id FROM students WHERE full_name = ?').get('Dilshod Karimov');
+    await ff.navigate(`${mainCtx.baseUrl}/#/students/${dilshodStudent.id}`);
+    await ff.waitFor(`document.querySelector('.page-title')?.textContent === 'Dilshod Karimov'`);
+
+    // Click "Tasdiqlash" button on the pending payment row
+    await ff.eval(`(() => {
+      const btn = Array.from(document.querySelectorAll('.data-table tbody tr button')).find(b => b.textContent.includes('Tasdiqlash'));
+      if (btn) btn.click();
+    })()`);
+    await ff.waitFor(`document.querySelector('.data-table tbody')?.textContent.includes('REC-202609-')`);
+
+    // Verify PDF receipt download endpoint returns valid PDF bytes (%PDF-)
+    const pdfVerification = await ff.eval(`(async () => {
+      const pdfLink = document.querySelector('.data-table tbody a[href*="/api/receipts/"]');
+      if (!pdfLink) return { ok: false, error: 'No PDF link found' };
+      const resp = await fetch(pdfLink.href);
+      const ct = resp.headers.get('content-type');
+      const buf = await resp.arrayBuffer();
+      const headerStr = String.fromCharCode(...new Uint8Array(buf.slice(0, 5)));
+      return { ok: resp.ok, status: resp.status, contentType: ct, isPdf: headerStr === '%PDF-' };
+    })()`);
+    assert.equal(pdfVerification.ok, true);
+    assert.equal(pdfVerification.isPdf, true, 'Receipt endpoint must return real valid PDF starting with %PDF-');
+
+    // Verify September 2026 debt is now 400 000 (600k - 200k confirmed)
+    await ff.navigate(`${mainCtx.baseUrl}/#/reports?tab=debtors&month=2026-09`);
+    await ff.waitFor(`document.getElementById('report-month-label')?.textContent.includes('Sentabr')`);
+    await ff.waitFor(`document.getElementById('debtors-search-input') !== null`);
+    await ff.fillInput('#debtors-search-input', 'Dilshod');
+    await ff.waitFor(`document.querySelector('#report-content .data-table tbody')?.textContent.includes('Dilshod Karimov')`);
+    const debtAfterConfirmSept = await ff.eval(`(() => {
+      const rows = Array.from(document.querySelectorAll('#report-content .data-table tbody tr'));
+      const row = rows.find(r => r.textContent.includes('Dilshod Karimov'));
+      return row ? row.textContent : '';
+    })()`);
+    assert.ok(debtAfterConfirmSept.replace(/\s+/g, ' ').includes('400 000'), 'Debt after confirmed payment must be 400 000');
+    assert.ok(debtAfterConfirmSept.replace(/\s+/g, ' ').includes('200 000'), 'Confirmed payment amount must be 200 000');
+
+    // Verify October 2026 debt is untouched (still 600 000, September payment did not leak to October)
+    await ff.fillInput('#debtor-month-input', '2026-10');
+    await ff.waitFor(`document.getElementById('report-month-label')?.textContent.includes('Oktabr')`);
+    await ff.waitFor(`document.getElementById('debtors-search-input') !== null`);
+    await ff.fillInput('#debtors-search-input', 'Dilshod');
+    await ff.waitFor(`document.querySelector('#report-content .data-table tbody')?.textContent.includes('Dilshod Karimov')`);
+    const debtOct = await ff.eval(`(() => {
+      const rows = Array.from(document.querySelectorAll('#report-content .data-table tbody tr'));
+      const row = rows.find(r => r.textContent.includes('Dilshod Karimov'));
+      return row ? row.textContent : '';
+    })()`);
+    assert.ok(debtOct.replace(/\s+/g, ' ').includes('600 000'), 'October debt must be 600 000');
+
+    // 5. Group Assignment Modal: Assign existing student to group without creating duplicate
+    const studentsCountBeforeAssign = mainCtx.db.prepare('SELECT COUNT(*) AS c FROM students').get().c;
+    await ff.navigate(`${mainCtx.baseUrl}/#/groups/1`);
+    await ff.waitFor(`document.querySelector('.page-title') !== null`);
+    await ff.clickSelector('#btn-group-add-student');
+    await ff.waitForModalOpen();
+    assert.equal(
+      await ff.eval(`document.querySelector('#modal-overlay .modal-title')?.textContent.includes('biriktirish')`),
+      true
+    );
+
+    await ff.fillInput('#assign-student-search', 'Dilshod');
+    await ff.waitFor(`document.querySelector('#modal-overlay table tbody')?.textContent.includes('Dilshod Karimov')`);
+    await ff.eval(`(() => {
+      const row = Array.from(document.querySelectorAll('#modal-overlay table tbody tr')).find(r => r.textContent.includes('Dilshod Karimov'));
+      const cb = row.querySelector('input[type="checkbox"]');
+      cb.click();
+    })()`);
+    await ff.clickSelector('#btn-assign-students-submit');
+    await ff.waitForModalClosed();
+    await ff.waitFor(`document.getElementById('main-content')?.textContent.includes('Dilshod Karimov')`);
+
+    const studentsCountAfterAssign = mainCtx.db.prepare('SELECT COUNT(*) AS c FROM students').get().c;
+    assert.equal(studentsCountAfterAssign, studentsCountBeforeAssign, 'Assigning existing student must never create duplicate student');
+    const dilshodGroup = mainCtx.db.prepare('SELECT group_id FROM students WHERE id = ?').get(dilshodStudent.id);
+    assert.equal(dilshodGroup.group_id, 1, 'Dilshod must now be assigned to Group 1');
+
+    // 6. Comprehensive Reports views: Overview, Groups breakdown with drill-down modal, and Annual report
+    await ff.navigate(`${mainCtx.baseUrl}/#/reports?tab=overview&month=2026-09`);
+    await ff.waitFor(`document.querySelector('.stats-grid') !== null`);
+    assert.equal(
+      await ff.eval(`document.getElementById('main-content')?.textContent.includes('Kutilayotgan to\\'lov (Reja)')`),
+      true
+    );
+    assert.equal(
+      await ff.eval(`document.getElementById('main-content')?.textContent.includes('Jami tushum (Tasdiqlangan)')`),
+      true
+    );
+
+    // Guruhlar bo'yicha tab
+    await ff.clickSelector('button[data-tab="groups"]');
+    await ff.waitFor(`document.querySelector('#report-content .data-table') !== null`);
+    // Click 'Tafsilotlar' on Group 1
+    const group1 = mainCtx.db.prepare('SELECT name FROM groups WHERE id = 1').get();
+    await ff.eval(`(() => {
+      const rows = Array.from(document.querySelectorAll('#report-content .data-table tbody tr'));
+      const row = rows.find(r => r.textContent.includes(${JSON.stringify(group1.name)}));
+      const btn = row ? Array.from(row.querySelectorAll('button')).find(b => b.textContent.includes('Tafsilotlar')) : null;
+      if (btn) btn.click();
+    })()`);
+    await ff.waitForModalOpen();
+    assert.equal(
+      await ff.eval(`document.querySelector('#modal-overlay .modal-title')?.textContent.includes('O\\'quvchilar tafsiloti')`),
+      true
+    );
+    assert.equal(
+      await ff.eval(`document.querySelector('#modal-overlay')?.textContent.includes('Dilshod Karimov')`),
+      true
+    );
+    await ff.pressKey('Escape');
+    await ff.waitForModalClosed();
+
+    // Yillik hisobot tab
+    await ff.clickSelector('button[data-tab="annual"]');
+    await ff.waitFor(`document.querySelector('#report-content .data-table tbody tr') !== null`);
+    const annualRowsCount = await ff.eval(`document.querySelectorAll('#report-content .data-table tbody tr').length`);
+    assert.ok(annualRowsCount >= 12, 'Annual report must render all 12 months');
+
+    completedWorkflows.push('Workflow 10: Financial Reporting, Month Calculations, PDF Receipts & Group Assignment');
+
     for (const line of completedWorkflows) {
       console.log(`[PASS] ${line}`);
     }
@@ -1082,7 +1315,7 @@ async function runE2E() {
   }
 }
 
-const isDirect = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname);
+const isDirect = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 if (isDirect) {
   runE2E().catch((err) => {
     console.error('E2E Browser Suite Failed:', err);

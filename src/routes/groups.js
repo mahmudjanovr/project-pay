@@ -9,9 +9,10 @@ import {
   createGroup,
   updateGroup,
   deleteGroup,
-  getStudentsByGroupId
+  getStudentsByGroupId,
+  assignStudentsToGroup
 } from '../services/groups.js';
-import { parseRouteId } from '../validators/index.js';
+import { parseRouteId, validateAssignStudentsInput } from '../validators/index.js';
 
 /**
  * Creates and configures the groups routes.
@@ -80,6 +81,32 @@ export function createGroupRouter(db) {
       const students = getStudentsByGroupId(db, groupId);
       res.status(200).json(students);
     } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /api/groups/:id/assign-students - Assign existing students to group
+  router.post('/:id/assign-students', (req, res, next) => {
+    try {
+      const groupId = parseRouteId(req.params.id);
+      const group = getGroupById(db, groupId);
+      if (!group) {
+        return res.status(404).json({
+          error: 'Not Found',
+          message: `Group with ID ${groupId} not found`
+        });
+      }
+
+      const validated = validateAssignStudentsInput(req.body);
+      const result = assignStudentsToGroup(db, groupId, validated.student_ids);
+      res.status(200).json(result);
+    } catch (err) {
+      if (err.statusCode === 404) {
+        return res.status(404).json({
+          error: 'Not Found',
+          message: err.message
+        });
+      }
       next(err);
     }
   });

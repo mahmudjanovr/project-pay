@@ -4,12 +4,18 @@ import assert from 'node:assert/strict';
 import { parsePaymentAmount, parseMonthlyFee } from '../public/js/amountParser.js';
 import {
   parsePaymentAmount as reExportedParsePaymentAmount,
-  parseMonthlyFee as reExportedParseMonthlyFee
+  parseMonthlyFee as reExportedParseMonthlyFee,
+  formatDateUzbek,
+  formatFriendlyMonthUzbek,
+  parseDateInput,
+  parseBillingMonthInput,
+  getCurrentLocalDateString
 } from '../public/js/formatters.js';
 import { createApp } from '../src/app.js';
 import { createDatabase } from '../src/db/connection.js';
 import { initDatabase } from '../src/db/init.js';
 import { createStudent, getStudentById } from '../src/services/students.js';
+import { getMonthlyDebtors } from '../src/services/debtors.js';
 
 // Setup Mock DOM environment for frontend form, modal, and combobox testing in Node.js
 class MockNode {}
@@ -259,7 +265,12 @@ function createTestContext() {
     app,
     server,
     baseUrl,
-    close: () => server.close()
+    close: () => {
+      if (typeof server.closeAllConnections === 'function') {
+        server.closeAllConnections();
+      }
+      server.close();
+    }
   };
 }
 
@@ -926,5 +937,243 @@ test('Monetary UI Inputs Regression (Add/Edit Student Modals & Payment Form)', a
       payments.map((p) => p.amount),
       [450000, 120001]
     );
+  });
+});
+
+// ==============================================================================
+// 6. Payment Form Date Fields, YYYY-MM Validation & Backdated Payments
+// ==============================================================================
+test('Payment Form Date Fields, YYYY-MM Validation & Backdated Payments', async (t) => {
+  const ctx = createTestContext();
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (url, init) => {
+    if (typeof url === 'string' && url.startsWith('/')) {
+      return originalFetch(`${ctx.baseUrl}${url}`, init);
+    }
+    return originalFetch(url, init);
+  };
+
+  function dismissActiveToasts() {
+    const closeBtns = globalThis.document.body.querySelectorAll('.toast-close');
+    for (const btn of closeBtns) {
+      btn.dispatchEvent({ type: 'click' });
+    }
+  }
+
+  t.after(() => {
+    dismissActiveToasts();
+    globalThis.fetch = originalFetch;
+    ctx.close();
+  });
+
+  await t.test('formatDateUzbek and formatFriendlyMonthUzbek formatting functions', () => {
+    assert.equal(formatDateUzbek('2026-10-28'), '28.10.2026');
+    assert.equal(formatDateUzbek('2026-09-05'), '05.09.2026');
+    assert.equal(formatDateUzbek('2026-10-28T12:00:00Z'), '28.10.2026');
+    assert.equal(formatDateUzbek(''), '—');
+    assert.equal(formatDateUzbek(null), '—');
+
+    assert.equal(formatFriendlyMonthUzbek('2026-10'), 'Oktabr 2026');
+    assert.equal(formatFriendlyMonthUzbek('2026-09'), 'Sentabr 2026');
+    assert.equal(formatFriendlyMonthUzbek('2026-01'), 'Yanvar 2026');
+    assert.equal(formatFriendlyMonthUzbek('2026-12'), 'Dekabr 2026');
+  });
+
+  await t.test('parseDateInput accepts DD.MM.YYYY, DD/MM/YYYY, and canonical YYYY-MM-DD', () => {
+    const r1 = parseDateInput('28.10.2026');
+    assert.equal(r1.valid, true);
+    assert.equal(r1.isoDate, '2026-10-28');
+    assert.equal(r1.displayDate, '28.10.2026');
+
+    const r2 = parseDateInput('28/10/2026');
+    assert.equal(r2.valid, true);
+    assert.equal(r2.isoDate, '2026-10-28');
+
+    const r3 = parseDateInput('2026-10-28');
+    assert.equal(r3.valid, true);
+    assert.equal(r3.isoDate, '2026-10-28');
+
+    // Leap year acceptance
+    const rLeap = parseDateInput('29.02.2024');
+    assert.equal(rLeap.valid, true);
+    assert.equal(rLeap.isoDate, '2024-02-29');
+
+    // Impossible calendar date rejection
+    assert.equal(parseDateInput('2026-02-30').valid, false);
+    assert.equal(parseDateInput('30.02.2026').valid, false);
+    assert.equal(parseDateInput('31.04.2026').valid, false);
+    assert.equal(parseDateInput('32.10.2026').valid, false);
+    assert.equal(parseDateInput('invalid-date').valid, false);
+    assert.equal(parseDateInput('').valid, false);
+  });
+
+  await t.test('parseBillingMonthInput validates YYYY-MM format', () => {
+    assert.deepEqual(parseBillingMonthInput('2026-10'), { valid: true, month: '2026-10' });
+    assert.deepEqual(parseBillingMonthInput('2026-09'), { valid: true, month: '2026-09' });
+    assert.deepEqual(parseBillingMonthInput('10.2026'), { valid: true, month: '2026-10' });
+
+    assert.equal(parseBillingMonthInput('2026-13').valid, false);
+    assert.equal(parseBillingMonthInput('2026-00').valid, false);
+    assert.equal(parseBillingMonthInput('2026-9').valid, false);
+    assert.equal(parseBillingMonthInput('2026').valid, false);
+    assert.equal(parseBillingMonthInput('abc').valid, false);
+  });
+
+  await t.test('Record Payment form defaults payment date to today in DD.MM.YYYY and shows friendly month label', async () => {
+    const student = createStudent(ctx.db, {
+      full_name: 'Date Test Student',
+      monthly_fee: 500000
+    });
+
+    const container = new MockElement('div');
+    await renderPayments(container, new URLSearchParams(`student_id=${student.id}&month=2026-10`));
+
+    const dateInput = container.querySelector('#payment-date-input');
+    assert.ok(dateInput);
+    assert.equal(dateInput.getAttribute('type'), 'text');
+    // Defaults to today in localized Uzbek format DD.MM.YYYY
+    const expectedTodayUz = formatDateUzbek(getCurrentLocalDateString());
+    assert.equal(dateInput.value, expectedTodayUz);
+
+    const monthInput = container.querySelector('#payment-month-input');
+    assert.ok(monthInput);
+    assert.equal(monthInput.value, '2026-10');
+
+    // Friendly month preview badge displays "Oktabr 2026"
+    const monthPreviewText = container.querySelector('#payment-month-preview-text');
+    assert.ok(monthPreviewText);
+    assert.equal(monthPreviewText.textContent, 'Oktabr 2026');
+
+    // Updating month input to 2026-09 updates preview to "Sentabr 2026"
+    monthInput.value = '2026-09';
+    monthInput.dispatchEvent({ type: 'input', target: monthInput });
+    assert.equal(monthPreviewText.textContent, 'Sentabr 2026');
+  });
+
+  await t.test('submits payment with localized date 28.10.2026 and serializes canonical YYYY-MM-DD to API', async () => {
+    const student = createStudent(ctx.db, {
+      full_name: 'Localized Payer',
+      monthly_fee: 500000
+    });
+
+    const container = new MockElement('div');
+    await renderPayments(container, new URLSearchParams(`student_id=${student.id}&month=2026-10`));
+
+    const form = container.querySelector('form');
+    const amountInput = container.querySelector('#payment-amount-input');
+    const dateInput = container.querySelector('#payment-date-input');
+    const monthInput = container.querySelector('#payment-month-input');
+    const errorBox = container.querySelector('#payment-error-box');
+
+    amountInput.value = '300000';
+    dateInput.value = '28.10.2026';
+    monthInput.value = '2026-10';
+
+    await form.dispatchEventAsync({ type: 'submit', preventDefault: () => {} });
+    dismissActiveToasts();
+
+    assert.equal(errorBox.style.display, 'none');
+
+    const res = await fetch(`${ctx.baseUrl}/api/students/${student.id}/payments`);
+    const payments = await res.json();
+    assert.equal(payments.length, 1);
+    assert.equal(payments[0].amount, 300000);
+    assert.equal(payments[0].payment_date, '2026-10-28');
+    assert.equal(payments[0].billing_month, '2026-10');
+  });
+
+  await t.test('backdated payment: payment received in October (28.10.2026) for September tuition (2026-09) reduces September debt and leaves October intact', async () => {
+    const student = createStudent(ctx.db, {
+      full_name: 'Backdated Payer',
+      monthly_fee: 500000,
+      enrollment_date: '2026-09-01'
+    });
+
+    // Check initial debt: September has 500,000 debt; October has 500,000 debt
+    const initialSepDebtors = getMonthlyDebtors(ctx.db, '2026-09');
+    const sepDebtor = initialSepDebtors.find((d) => d.student_id === student.id);
+    assert.ok(sepDebtor);
+    assert.equal(sepDebtor.debt, 500000);
+
+    const initialOctDebtors = getMonthlyDebtors(ctx.db, '2026-10');
+    const octDebtor = initialOctDebtors.find((d) => d.student_id === student.id);
+    assert.ok(octDebtor);
+    assert.equal(octDebtor.debt, 500000);
+
+    // Record payment received on October 28 (28.10.2026) for September tuition (2026-09)
+    const container = new MockElement('div');
+    await renderPayments(container, new URLSearchParams(`student_id=${student.id}&month=2026-09`));
+
+    const form = container.querySelector('form');
+    const amountInput = container.querySelector('#payment-amount-input');
+    const dateInput = container.querySelector('#payment-date-input');
+    const monthInput = container.querySelector('#payment-month-input');
+    const errorBox = container.querySelector('#payment-error-box');
+
+    amountInput.value = '200000';
+    dateInput.value = '28.10.2026'; // Money received in October
+    monthInput.value = '2026-09';   // Allocated to September tuition
+
+    await form.dispatchEventAsync({ type: 'submit', preventDefault: () => {} });
+    dismissActiveToasts();
+
+    assert.equal(errorBox.style.display, 'none');
+
+    // Verify stored payment record
+    const res = await fetch(`${ctx.baseUrl}/api/students/${student.id}/payments`);
+    const payments = await res.json();
+    assert.equal(payments.length, 1);
+    assert.equal(payments[0].payment_date, '2026-10-28');
+    assert.equal(payments[0].billing_month, '2026-09');
+    assert.equal(payments[0].amount, 200000);
+
+    // Verify September debt: reduced to 300,000 (500000 - 200000)
+    const afterSepDebtors = getMonthlyDebtors(ctx.db, '2026-09');
+    const updatedSep = afterSepDebtors.find((d) => d.student_id === student.id);
+    assert.ok(updatedSep);
+    assert.equal(updatedSep.debt, 300000);
+    assert.equal(updatedSep.total_paid, 200000);
+
+    // Verify October debt: remains 500,000 (September payment MUST NOT reduce October debt!)
+    const afterOctDebtors = getMonthlyDebtors(ctx.db, '2026-10');
+    const updatedOct = afterOctDebtors.find((d) => d.student_id === student.id);
+    assert.ok(updatedOct);
+    assert.equal(updatedOct.debt, 500000);
+    assert.equal(updatedOct.total_paid, 0);
+  });
+
+  await t.test('shows clear format error only when date or month is genuinely invalid (no misleading Hisobot oyi message)', async () => {
+    const student = createStudent(ctx.db, {
+      full_name: 'Invalid Input Student',
+      monthly_fee: 500000
+    });
+
+    const container = new MockElement('div');
+    await renderPayments(container, new URLSearchParams(`student_id=${student.id}`));
+
+    const form = container.querySelector('form');
+    const amountInput = container.querySelector('#payment-amount-input');
+    const dateInput = container.querySelector('#payment-date-input');
+    const monthInput = container.querySelector('#payment-month-input');
+    const errorBox = container.querySelector('#payment-error-box');
+
+    amountInput.value = '100000';
+
+    // 1. Invalid calendar date
+    dateInput.value = '2026-02-30';
+    monthInput.value = '2026-10';
+    await form.dispatchEventAsync({ type: 'submit', preventDefault: () => {} });
+    assert.equal(errorBox.style.display, 'block');
+    assert.ok(errorBox.textContent.includes('taqvim sanasini'));
+    assert.ok(!errorBox.textContent.includes('Hisobot oyi'));
+
+    // 2. Invalid billing month
+    dateInput.value = '28.10.2026';
+    monthInput.value = '2026-13';
+    await form.dispatchEventAsync({ type: 'submit', preventDefault: () => {} });
+    assert.equal(errorBox.style.display, 'block');
+    assert.ok(errorBox.textContent.includes('to\'g\'ri tanlang (YYYY-MM'));
+    assert.ok(!errorBox.textContent.includes('Hisobot oyi'));
   });
 });

@@ -4,7 +4,8 @@
 
 import { Router } from 'express';
 import { getMonthlyDebtors } from '../services/debtors.js';
-import { validateReportMonth } from '../validators/index.js';
+import { getMonthlyOverview, getGroupReports, getAnnualOverview } from '../services/reports.js';
+import { validateReportMonth, validateReportYear } from '../validators/index.js';
 
 /**
  * Creates a request handler for monthly debtor reports.
@@ -44,6 +45,63 @@ export function createReportRouter(db) {
 
   // GET /api/reports/debtors?month=YYYY-MM
   router.get('/debtors', createDebtorsHandler(db));
+
+  // GET /api/reports/overview?month=YYYY-MM
+  router.get('/overview', (req, res, next) => {
+    try {
+      const monthParam = req.query.month;
+      if (!monthParam || typeof monthParam !== 'string') {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: 'Query parameter "month" is required in YYYY-MM format'
+        });
+      }
+
+      const validMonth = validateReportMonth(monthParam);
+      const overview = getMonthlyOverview(db, validMonth);
+      res.status(200).json(overview);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /api/reports/groups?month=YYYY-MM
+  router.get('/groups', (req, res, next) => {
+    try {
+      const monthParam = req.query.month;
+      if (!monthParam || typeof monthParam !== 'string') {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: 'Query parameter "month" is required in YYYY-MM format'
+        });
+      }
+
+      const validMonth = validateReportMonth(monthParam);
+      const groupReports = getGroupReports(db, validMonth);
+      res.status(200).json(groupReports);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /api/reports/annual?year=YYYY
+  router.get('/annual', (req, res, next) => {
+    try {
+      const yearParam = req.query.year;
+      if (!yearParam || typeof yearParam !== 'string') {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: 'Query parameter "year" is required in YYYY format'
+        });
+      }
+
+      const validYear = validateReportYear(yearParam);
+      const annualReport = getAnnualOverview(db, validYear);
+      res.status(200).json(annualReport);
+    } catch (err) {
+      next(err);
+    }
+  });
 
   return router;
 }

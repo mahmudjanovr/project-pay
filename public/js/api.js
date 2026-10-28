@@ -84,6 +84,10 @@ async function request(url, options = {}) {
         userMessage = 'So\'ralgan o\'quvchi topilmadi.';
       } else if (rawMessage.includes('Group with ID')) {
         userMessage = 'So\'ralgan guruh topilmadi.';
+      } else if (rawMessage.includes('Payment with ID')) {
+        userMessage = 'So\'ralgan to\'lov topilmadi.';
+      } else if (rawMessage.includes('Receipt')) {
+        userMessage = 'So\'ralgan chek / kvitansiya topilmadi.';
       } else {
         userMessage = 'So\'ralgan ma\'lumot topilmadi.';
       }
@@ -93,8 +97,10 @@ async function request(url, options = {}) {
       userMessage = 'Serverda texnik xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko\'ring.';
     } else if (status === 400) {
       const lower = rawMessage.toLowerCase();
-      if (lower.includes('payment date') || lower.includes('calendar date')) {
-        userMessage = 'To\'lov sanasi haqiqiy taqvim sanasi bo\'lishi shart (YYYY-MM-DD).';
+      if (lower.includes('billing month') || lower.includes('billing_month')) {
+        userMessage = 'To\'lov hisoblangan oy (qaysi oy uchun) YYYY-MM formatida bo\'lishi kerak (masalan: 2026-10).';
+      } else if (lower.includes('payment date') || lower.includes('calendar date')) {
+        userMessage = 'To\'lov sanasi haqiqiy taqvim sanasi bo\'lishi shart (KK.OO.YYYY yoki YYYY-MM-DD).';
       } else if (lower.includes('month') && !lower.includes('monthly')) {
         userMessage = 'Hisobot oyi YYYY-MM formatida bo\'lishi kerak.';
       } else if (lower.includes('student name') || lower.includes('full_name')) {
@@ -111,6 +117,8 @@ async function request(url, options = {}) {
         userMessage = 'Yuborilgan so\'rov formati yaroqsiz (JSON xatosi).';
       } else if (lower.includes('overflow') || lower.includes('safe integer')) {
         userMessage = 'Hisob-kitob summasi ruxsat etilgan maksimal chegaradan oshib ketdi.';
+      } else if (lower.includes("o'quvchi tanlanishi lozim")) {
+        userMessage = "Kamida bitta o'quvchi tanlanishi lozim.";
       } else {
         userMessage = 'Kiritilgan ma\'lumotlar yaroqsiz.';
       }
@@ -134,13 +142,16 @@ export async function fetchStudent(id) {
   return request(`/api/students/${id}`);
 }
 
-export async function createStudent({ full_name, phone, monthly_fee, group_id = null }) {
+export async function createStudent({ full_name, phone, monthly_fee, group_id = null, enrollment_date = null }) {
   const payload = { full_name, monthly_fee };
   if (phone !== undefined) {
     payload.phone = phone;
   }
   if (group_id !== undefined) {
     payload.group_id = group_id;
+  }
+  if (enrollment_date !== undefined) {
+    payload.enrollment_date = enrollment_date;
   }
   return request('/api/students', {
     method: 'POST',
@@ -195,17 +206,46 @@ export async function deleteGroup(id) {
   });
 }
 
+export async function assignStudentsToGroup(groupId, studentIds) {
+  return request(`/api/groups/${groupId}/assign-students`, {
+    method: 'POST',
+    body: JSON.stringify({ student_ids: studentIds })
+  });
+}
+
 // Payment API Calls
 
-export async function recordPayment({ student_id, amount, payment_date }) {
+export async function recordPayment({
+  student_id,
+  amount,
+  payment_date,
+  billing_month,
+  payment_method = 'cash',
+  status = 'confirmed'
+}) {
+  const payload = { student_id, amount, payment_date };
+  if (billing_month) payload.billing_month = billing_month;
+  if (payment_method) payload.payment_method = payment_method;
+  if (status) payload.status = status;
+
   return request('/api/payments', {
     method: 'POST',
-    body: JSON.stringify({ student_id, amount, payment_date })
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function confirmPayment(paymentId) {
+  return request(`/api/payments/${paymentId}/confirm`, {
+    method: 'POST'
   });
 }
 
 export async function fetchStudentPayments(studentId) {
   return request(`/api/students/${studentId}/payments`);
+}
+
+export async function fetchPaymentReceipt(paymentId) {
+  return request(`/api/payments/${paymentId}/receipt`);
 }
 
 // Report API Calls
@@ -215,3 +255,17 @@ export async function fetchMonthlyDebtors(month) {
   return request(`/api/reports/debtors?month=${query}`);
 }
 
+export async function fetchReportOverview(month) {
+  const query = encodeURIComponent(month);
+  return request(`/api/reports/overview?month=${query}`);
+}
+
+export async function fetchReportGroups(month) {
+  const query = encodeURIComponent(month);
+  return request(`/api/reports/groups?month=${query}`);
+}
+
+export async function fetchReportAnnual(year) {
+  const query = encodeURIComponent(year);
+  return request(`/api/reports/annual?year=${query}`);
+}

@@ -85,5 +85,74 @@ export const migrations = [
         db.exec('ALTER TABLE students ADD COLUMN phone TEXT;');
       }
     }
+  },
+  {
+    version: '005_add_payment_billing_month_and_confirmation',
+    up(db) {
+      const paymentColumns = db.prepare('PRAGMA table_info(payments)').all();
+      const hasBillingMonth = paymentColumns.some((col) => col.name === 'billing_month');
+      if (!hasBillingMonth) {
+        db.exec('ALTER TABLE payments ADD COLUMN billing_month TEXT;');
+      }
+
+      const hasStatus = paymentColumns.some((col) => col.name === 'status');
+      if (!hasStatus) {
+        db.exec("ALTER TABLE payments ADD COLUMN status TEXT NOT NULL DEFAULT 'confirmed';");
+      }
+
+      const hasConfirmedAt = paymentColumns.some((col) => col.name === 'confirmed_at');
+      if (!hasConfirmedAt) {
+        db.exec('ALTER TABLE payments ADD COLUMN confirmed_at TEXT;');
+      }
+
+      const hasPaymentMethod = paymentColumns.some((col) => col.name === 'payment_method');
+      if (!hasPaymentMethod) {
+        db.exec("ALTER TABLE payments ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'cash';");
+      }
+
+      // Safe migration policy for existing payments:
+      // In the pre-existing system, payments were attributed to the calendar month of payment_date.
+      // Infer billing_month from substr(payment_date, 1, 7) for existing records.
+      db.exec(`
+        UPDATE payments
+        SET billing_month = substr(payment_date, 1, 7)
+        WHERE billing_month IS NULL;
+
+        UPDATE payments
+        SET confirmed_at = created_at
+        WHERE confirmed_at IS NULL AND status = 'confirmed';
+      `);
+
+      const studentColumns = db.prepare('PRAGMA table_info(students)').all();
+      const hasEnrollmentDate = studentColumns.some((col) => col.name === 'enrollment_date');
+      if (!hasEnrollmentDate) {
+        db.exec('ALTER TABLE students ADD COLUMN enrollment_date TEXT;');
+      }
+
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_payments_student_billing_status ON payments (student_id, billing_month, status);
+        CREATE INDEX IF NOT EXISTS idx_payments_billing_month ON payments (billing_month);
+      `);
+    }
+  },
+  {
+    version: '006_create_receipts_table',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS receipts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          receipt_number TEXT NOT NULL UNIQUE CHECK (length(trim(receipt_number)) > 0),
+          payment_id INTEGER NOT NULL UNIQUE REFERENCES payments(id) ON DELETE RESTRICT,
+          student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
+          amount INTEGER NOT NULL CHECK (amount > 0 AND amount <= 9007199254740991),
+          billing_month TEXT NOT NULL CHECK (billing_month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+          issued_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        ) STRICT;
+
+        CREATE INDEX IF NOT EXISTS idx_receipts_student_id ON receipts (student_id);
+        CREATE INDEX IF NOT EXISTS idx_receipts_payment_id ON receipts (payment_id);
+        CREATE INDEX IF NOT EXISTS idx_receipts_number ON receipts (receipt_number);
+      `);
+    }
   }
 ];

@@ -76,9 +76,27 @@ export const paymentDateSchema = z.string({
 export const reportMonthSchema = z.string({
   message: 'Report month must be a string'
 })
+  .trim()
   .regex(/^\d{4}-(0[1-9]|1[0-2])$/, {
     message: 'Report month must be in exact YYYY-MM format with month between 01 and 12'
   });
+
+/**
+ * Validates billing month for payments:
+ * - Must be a string.
+ * - Must match exact YYYY-MM pattern with month in 01-12.
+ */
+export const billingMonthSchema = z.string({
+  message: 'Billing month must be a string'
+})
+  .trim()
+  .regex(/^\d{4}-(0[1-9]|1[0-2])$/, {
+    message: 'Billing month must be in exact YYYY-MM format with month between 01 and 12'
+  });
+
+export function validateBillingMonth(month) {
+  return billingMonthSchema.parse(month);
+}
 
 /**
  * Validates positive safe integer ID (e.g. student_id).
@@ -163,13 +181,27 @@ export const studentPhoneSchema = z.string({
   .transform((val) => (val === null || val === '' ? null : val));
 
 /**
+ * Validates optional student enrollment date (YYYY-MM or YYYY-MM-DD):
+ */
+export const enrollmentDateSchema = z.string({
+  message: 'Enrollment date must be a string'
+})
+  .trim()
+  .regex(/^\d{4}-(0[1-9]|1[0-2])(-([0-2][0-9]|3[01]))?$/, {
+    message: 'Enrollment date must be in YYYY-MM or YYYY-MM-DD format'
+  })
+  .nullable()
+  .transform((val) => (val === null || val === '' ? null : val));
+
+/**
  * Schema for creating a student record.
  */
 export const createStudentSchema = z.object({
   full_name: studentNameSchema,
   phone: studentPhoneSchema.optional(),
   monthly_fee: monthlyFeeSchema,
-  group_id: groupIdSchema.optional()
+  group_id: groupIdSchema.optional(),
+  enrollment_date: enrollmentDateSchema.optional()
 }).strict();
 
 /**
@@ -180,7 +212,8 @@ export const updateStudentSchema = z.object({
   full_name: studentNameSchema.optional(),
   phone: studentPhoneSchema.optional(),
   monthly_fee: monthlyFeeSchema.optional(),
-  group_id: groupIdSchema.optional()
+  group_id: groupIdSchema.optional(),
+  enrollment_date: enrollmentDateSchema.optional()
 })
   .strict()
   .refine(
@@ -188,9 +221,10 @@ export const updateStudentSchema = z.object({
       data.full_name !== undefined ||
       data.phone !== undefined ||
       data.monthly_fee !== undefined ||
-      data.group_id !== undefined,
+      data.group_id !== undefined ||
+      data.enrollment_date !== undefined,
     {
-      message: 'At least one field (full_name, phone, monthly_fee, or group_id) must be provided for update'
+      message: 'At least one field (full_name, phone, monthly_fee, group_id, or enrollment_date) must be provided for update'
     }
   );
 
@@ -235,13 +269,56 @@ export function validateGroupName(name) {
 }
 
 /**
+ * Validates payment status ('pending' or 'confirmed').
+ */
+export const paymentStatusSchema = z.enum(['pending', 'confirmed'], {
+  message: "Payment status must be 'pending' or 'confirmed'"
+});
+
+/**
+ * Validates payment method ('cash', 'bank_transfer', 'card', 'other').
+ */
+export const paymentMethodSchema = z.enum(['cash', 'bank_transfer', 'card', 'other'], {
+  message: "Payment method must be 'cash', 'bank_transfer', 'card', or 'other'"
+});
+
+/**
  * Schema for creating a payment record.
  */
 export const createPaymentSchema = z.object({
   student_id: idSchema,
   amount: paymentAmountSchema,
-  payment_date: paymentDateSchema
+  payment_date: paymentDateSchema,
+  billing_month: billingMonthSchema.optional(),
+  payment_method: paymentMethodSchema.optional(),
+  status: paymentStatusSchema.optional()
 }).strict();
+
+/**
+ * Schema for assigning multiple existing students to a group.
+ */
+export const assignStudentsSchema = z.object({
+  student_ids: z.array(idSchema).min(1, {
+    message: "Kamida bitta o'quvchi tanlanishi lozim"
+  })
+}).strict();
+
+/**
+ * Validates report year (YYYY).
+ */
+export const reportYearSchema = z.string({
+  message: 'Report year must be a string'
+}).regex(/^\d{4}$/, {
+  message: 'Report year must be in exact YYYY format'
+});
+
+export function validateAssignStudentsInput(input) {
+  return assignStudentsSchema.parse(input);
+}
+
+export function validateReportYear(year) {
+  return reportYearSchema.parse(year);
+}
 
 // Reusable validation helper functions
 

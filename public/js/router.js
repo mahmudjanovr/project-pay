@@ -10,7 +10,9 @@ import { renderGroups } from './views/groups.js';
 import { renderGroupDetail } from './views/groupDetail.js';
 import { renderPayments } from './views/payments.js';
 import { renderDebtors } from './views/debtors.js';
+import { renderReports } from './views/reports.js';
 import { closeModal } from './modal.js';
+import { dismissAllToasts } from './notifications.js';
 import { el, clearElement } from './dom.js';
 
 export class Router {
@@ -29,6 +31,7 @@ export class Router {
       { pattern: /^#\/groups\/?$/, handler: (view, params) => renderGroups(view, params), navId: 'nav-groups' },
       { pattern: /^#\/groups\/(\d+)\/?$/, handler: (view, params, match) => renderGroupDetail(view, match[1], params), navId: 'nav-groups' },
       { pattern: /^#\/payments\/?$/, handler: (view, params) => renderPayments(view, params), navId: 'nav-payments' },
+      { pattern: /^#\/reports\/?$/, handler: (view, params) => renderReports(view, params), navId: 'nav-debtors' },
       { pattern: /^#\/debtors\/?$/, handler: (view, params) => renderDebtors(view, params), navId: 'nav-debtors' }
     ];
   }
@@ -59,6 +62,7 @@ export class Router {
 
     // Dismiss any open modal and run previous view cleanup on navigation
     closeModal();
+    dismissAllToasts();
     if (typeof this.activeCleanup === 'function') {
       const cleanup = this.activeCleanup;
       this.activeCleanup = null;

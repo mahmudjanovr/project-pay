@@ -56,11 +56,13 @@ test('Database initialization and repeat initialization', async (t) => {
       assert.equal(payments.count, 0, 'No demo payment records should exist');
 
       const migrations = db.prepare('SELECT * FROM schema_migrations ORDER BY id ASC').all();
-      assert.equal(migrations.length, 4);
+      assert.equal(migrations.length, 6);
       assert.equal(migrations[0].version, '001_initial_schema');
       assert.equal(migrations[1].version, '002_harden_constraints');
       assert.equal(migrations[2].version, '003_add_groups_table');
       assert.equal(migrations[3].version, '004_add_student_phone');
+      assert.equal(migrations[4].version, '005_add_payment_billing_month_and_confirmation');
+      assert.equal(migrations[5].version, '006_create_receipts_table');
     } finally {
       db.close();
     }
