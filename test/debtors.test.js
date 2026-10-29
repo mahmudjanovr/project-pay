@@ -148,24 +148,29 @@ test('Future month debt calculation', async (t) => {
   createStudent(db, { full_name: 'Student B', monthly_fee: 900000 });
   createStudent(db, { full_name: 'Student Free', monthly_fee: 0 });
 
-  await t.test('future month with no payments shows debt for all fee-paying students', () => {
+  await t.test('future month before it starts has zero debtors and creates no premature liabilities', () => {
     const futureDebtors = getMonthlyDebtors(db, '2035-08');
+    assert.equal(futureDebtors.length, 0);
+  });
 
-    // Fee-paying students owe their full monthly_fee
-    assert.equal(futureDebtors.length, 2);
+  await t.test('once the month begins (evaluated with reference date), fee-paying students are calculated normally', () => {
+    const debtors = getMonthlyDebtors(db, '2035-08', '2035-08-01');
 
-    const a = futureDebtors.find((d) => d.full_name === 'Student A');
+    // Fee-paying students owe their full monthly_fee once the month begins
+    assert.equal(debtors.length, 2);
+
+    const a = debtors.find((d) => d.full_name === 'Student A');
     assert.ok(a);
     assert.equal(a.total_paid, 0);
     assert.equal(a.debt, 600000);
 
-    const b = futureDebtors.find((d) => d.full_name === 'Student B');
+    const b = debtors.find((d) => d.full_name === 'Student B');
     assert.ok(b);
     assert.equal(b.total_paid, 0);
     assert.equal(b.debt, 900000);
 
     // Free student is not in debtors
-    assert.equal(futureDebtors.some((d) => d.full_name === 'Student Free'), false);
+    assert.equal(debtors.some((d) => d.full_name === 'Student Free'), false);
   });
 });
 

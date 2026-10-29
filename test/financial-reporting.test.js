@@ -192,8 +192,12 @@ test('Priority 1: Isolated deterministic fixtures for September, October, Novemb
     assert.equal(octDebtors.some((d) => d.student_id === sLateEnrolled.id), false, 'November student not liable in October');
   });
 
-  await t.test('November 2026 (2026-11): sLateEnrolled is now enrolled and liable', () => {
-    const novDebtors = getMonthlyDebtors(db, '2026-11');
+  await t.test('November 2026 (2026-11): sLateEnrolled is now enrolled and liable once November begins', () => {
+    // Before November starts (as of October 29), November has zero debtors
+    assert.equal(getMonthlyDebtors(db, '2026-11', '2026-10-29').length, 0);
+
+    // Once November starts (evaluated on 2026-11-01), sLateEnrolled is liable
+    const novDebtors = getMonthlyDebtors(db, '2026-11', '2026-11-01');
 
     // In November, no one has paid.
     // Liable fee-paying students: sUnpaid (500k), sPaidSep (600k), sPartial (400k), sPending (500k), sPaidOct (500k), sLateEnrolled (450k)
@@ -205,8 +209,13 @@ test('Priority 1: Isolated deterministic fixtures for September, October, Novemb
     assert.equal(novLate.debt, 450000);
   });
 
-  await t.test('December 2026 (2026-12): zero-payment month reflects full debts for all liable students', () => {
-    const decDebtors = getMonthlyDebtors(db, '2026-12');
+  await t.test('December 2026 (2026-12): zero-payment month reflects full debts once December begins', () => {
+    // Before December starts (as of October 29 or November 1), December has zero debtors
+    assert.equal(getMonthlyDebtors(db, '2026-12', '2026-10-29').length, 0);
+    assert.equal(getMonthlyDebtors(db, '2026-12', '2026-11-01').length, 0);
+
+    // Once December starts (evaluated on 2026-12-01)
+    const decDebtors = getMonthlyDebtors(db, '2026-12', '2026-12-01');
     assert.equal(decDebtors.length, 6);
 
     const totalDecDebt = decDebtors.reduce((sum, d) => sum + d.debt, 0);
@@ -552,9 +561,18 @@ test('Student enrollment date logic, pre-2026 enrollments, and backdated billing
       assert.ok(octDebtors.find((d) => d.student_id === sPre2026.id));
     });
 
-    await t.test('November & December 2026: October students remain liable according to enrollment-month policy', () => {
+    await t.test('November & December 2026: zero premature liabilities before start, liable once months begin', () => {
+      // As of October 29, 2026: zero liabilities
       for (const m of ['2026-11', '2026-12']) {
-        const overview = getMonthlyOverview(db, m);
+        const overview = getMonthlyOverview(db, m, '2026-10-29');
+        assert.equal(overview.total_expected, 0);
+        assert.equal(overview.total_debt, 0);
+        assert.equal(overview.debtor_count, 0);
+      }
+
+      // Once each month begins: calculated according to enrollment-month policy
+      for (const m of ['2026-11', '2026-12']) {
+        const overview = getMonthlyOverview(db, m, `${m}-01`);
         assert.equal(overview.total_expected, 1950000);
         assert.equal(overview.total_debt, 1950000);
         assert.equal(overview.debtor_count, 4);
@@ -677,35 +695,98 @@ test('Regression: Five-student dataset with mixed enrollment dates and payments 
     assert.equal(groupConfirmedSum, 3050000);
   });
 
-  await t.test('November 2026: all five students are counted (expected = 2,600,000 UZS), debt = 2,600,000 UZS, 5 debtors', () => {
-    const overview = getMonthlyOverview(db, '2026-11');
-    assert.equal(overview.total_expected, 2600000);
-    assert.equal(overview.total_confirmed, 0);
-    assert.equal(overview.total_debt, 2600000);
-    assert.equal(overview.debtor_count, 5);
+  await t.test('When reference date is October 29, 2026, November and December have zero expected tuition, pending amount, outstanding debt, and debtors', () => {
+    for (const m of ['2026-11', '2026-12']) {
+      const overview = getMonthlyOverview(db, m, '2026-10-29');
+      assert.equal(overview.total_expected, 0, `${m} expected tuition must be 0 before month begins`);
+      assert.equal(overview.total_pending, 0, `${m} pending amount must be 0 before month begins`);
+      assert.equal(overview.total_debt, 0, `${m} outstanding debt must be 0 before month begins`);
+      assert.equal(overview.debtor_count, 0, `${m} debtor count must be 0 before month begins`);
+      assert.equal(overview.pending_count, 0);
+      assert.equal(overview.fully_paid_count, 0);
 
-    const debtors = getMonthlyDebtors(db, '2026-11');
-    assert.equal(debtors.length, 5);
-    const ids = debtors.map((d) => d.student_id).sort();
+      const debtors = getMonthlyDebtors(db, m, '2026-10-29');
+      assert.equal(debtors.length, 0, `${m} must have 0 debtors before month begins`);
+
+      const groups = getGroupReports(db, m, '2026-10-29');
+      const sumExpected = groups.reduce((sum, g) => sum + g.total_expected, 0);
+      const sumDebt = groups.reduce((sum, g) => sum + g.total_debt, 0);
+      const sumDebtors = groups.reduce((sum, g) => sum + g.debtor_count, 0);
+      const sumPending = groups.reduce((sum, g) => sum + g.total_pending, 0);
+      assert.equal(sumExpected, 0);
+      assert.equal(sumDebt, 0);
+      assert.equal(sumDebtors, 0);
+      assert.equal(sumPending, 0);
+    }
+
+    const annual = getAnnualOverview(db, '2026', '2026-10-29');
+    assert.equal(annual.totals.total_expected, 2600000, 'Annual expected as of Oct 29 only includes started months');
+    assert.equal(annual.totals.total_confirmed_billing, 3050000);
+    assert.equal(annual.totals.total_debt, 0);
+    assert.equal(annual.totals.total_cash_received, 3050000);
+  });
+
+  await t.test('On November 1, November eligible students are calculated normally, while December remains zero for future liabilities', () => {
+    // November is now started
+    const novOverview = getMonthlyOverview(db, '2026-11', '2026-11-01');
+    assert.equal(novOverview.total_expected, 2600000, 'November expected tuition is calculated once November begins');
+    assert.equal(novOverview.total_confirmed, 0);
+    assert.equal(novOverview.total_debt, 2600000);
+    assert.equal(novOverview.debtor_count, 5);
+
+    const novDebtors = getMonthlyDebtors(db, '2026-11', '2026-11-01');
+    assert.equal(novDebtors.length, 5);
+    const ids = novDebtors.map((d) => d.student_id).sort();
     assert.deepEqual(ids, [s1.id, s2.id, s3.id, s5.id, s6.id].sort());
+
+    // December has NOT started yet
+    const decOverview = getMonthlyOverview(db, '2026-12', '2026-11-01');
+    assert.equal(decOverview.total_expected, 0, 'December must remain 0 on November 1');
+    assert.equal(decOverview.total_pending, 0);
+    assert.equal(decOverview.total_debt, 0);
+    assert.equal(decOverview.debtor_count, 0);
+
+    const decDebtors = getMonthlyDebtors(db, '2026-12', '2026-11-01');
+    assert.equal(decDebtors.length, 0, 'December must have 0 debtors on November 1');
   });
 
-  await t.test('December 2026: all five students are counted (expected = 2,600,000 UZS), debt = 2,600,000 UZS, 5 debtors', () => {
-    const overview = getMonthlyOverview(db, '2026-12');
-    assert.equal(overview.total_expected, 2600000);
-    assert.equal(overview.total_confirmed, 0);
-    assert.equal(overview.total_debt, 2600000);
-    assert.equal(overview.debtor_count, 5);
+  await t.test('On December 1, December eligible students are calculated normally', () => {
+    const decOverview = getMonthlyOverview(db, '2026-12', '2026-12-01');
+    assert.equal(decOverview.total_expected, 2600000, 'December expected tuition is calculated once December begins');
+    assert.equal(decOverview.total_confirmed, 0);
+    assert.equal(decOverview.total_debt, 2600000);
+    assert.equal(decOverview.debtor_count, 5);
 
-    const debtors = getMonthlyDebtors(db, '2026-12');
-    assert.equal(debtors.length, 5);
-  });
+    const decDebtors = getMonthlyDebtors(db, '2026-12', '2026-12-01');
+    assert.equal(decDebtors.length, 5);
 
-  await t.test('Annual report totals verify 7,800,000 UZS annual expected across 12 months', () => {
-    const annual = getAnnualOverview(db, '2026');
-    assert.equal(annual.totals.total_expected, 7800000);
+    const annual = getAnnualOverview(db, '2026', '2026-12-01');
+    assert.equal(annual.totals.total_expected, 7800000, 'Annual expected evaluated as of December includes all months');
     assert.equal(annual.totals.total_confirmed_billing, 3050000);
     assert.equal(annual.totals.total_debt, 5200000);
     assert.equal(annual.totals.total_cash_received, 3050000);
+  });
+
+  await t.test('Preserves confirmed advance payments and real cash receipts for future months', () => {
+    // Record a genuine confirmed advance payment: Student 1 pays 200,000 UZS on 2026-10-29 for billing month 2026-11
+    createPayment(db, {
+      student_id: s1.id,
+      amount: 200000,
+      payment_date: '2026-10-29',
+      billing_month: '2026-11',
+      status: 'confirmed'
+    });
+
+    // When evaluated as of October 29:
+    const novOverview = getMonthlyOverview(db, '2026-11', '2026-10-29');
+    assert.equal(novOverview.total_confirmed, 200000, 'Confirmed billing revenue for Nov must be preserved');
+    assert.equal(novOverview.total_expected, 0, 'Expected tuition remains 0 in future month');
+    assert.equal(novOverview.total_debt, 0, 'Debt remains 0 in future month');
+    assert.equal(novOverview.debtor_count, 0, 'Debtors remain 0 in future month');
+    assert.equal(novOverview.total_cash_received, 0, 'No cash received in November calendar month');
+
+    // October cash received includes the 200,000 paid on 2026-10-29
+    const octOverview = getMonthlyOverview(db, '2026-10', '2026-10-29');
+    assert.equal(octOverview.total_cash_received, 3050000 + 200000, 'Cash received by payment date is preserved');
   });
 });

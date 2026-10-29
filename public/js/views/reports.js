@@ -187,11 +187,12 @@ export async function renderReports(container, queryParams = new URLSearchParams
  * 1. Overview Tab
  */
 function renderOverviewView(container, data, monthStr) {
+  const isFuture = typeof monthStr === 'string' && monthStr > getCurrentLocalMonthString();
   const cards = el('div', { className: 'stats-grid', style: 'margin-bottom: var(--space-6);' },
     el('div', { className: 'stat-card' },
       el('span', { className: 'stat-label' }, 'Kutilayotgan to\'lov (Reja)'),
       el('div', { className: 'stat-value' }, formatUzbekSom(data.total_expected)),
-      el('span', { className: 'stat-desc' }, `${formatMonthName(monthStr)} oylik reja summasi`)
+      el('span', { className: 'stat-desc' }, isFuture ? `${formatMonthName(monthStr)} hali boshlanmagan` : `${formatMonthName(monthStr)} oylik reja summasi`)
     ),
     el('div', { className: 'stat-card accent-green' },
       el('span', { className: 'stat-label' }, 'Jami tushum (Tasdiqlangan)'),
@@ -522,11 +523,14 @@ function renderDebtorsView(container, debtors, targetMonth, shell) {
 
 function renderDebtorsTable(debtors, monthStr, onPageChange = null) {
   if (debtors.length === 0) {
+    const isFuture = typeof monthStr === 'string' && monthStr > getCurrentLocalMonthString();
     return el('div', { className: 'empty-state' },
       el('div', { className: 'empty-state-icon' }, '✓'),
       el('h3', { className: 'empty-state-title' }, 'Qarzdorlik mavjud emas'),
       el('p', { className: 'empty-state-description' },
-        `${formatMonthName(monthStr)} uchun barcha o'quvchilar belgilangan to'lovlarni to'liq amalga oshirgan yoki oylik to'lov stavkasi mavjud emas.`
+        isFuture
+          ? `${formatMonthName(monthStr)} hali boshlanmagan. Kelgusi oylar uchun to'lov majburiyatlari va qarzdorlik hisoblanmaydi.`
+          : `${formatMonthName(monthStr)} uchun barcha o'quvchilar belgilangan to'lovlarni to'liq amalga oshirgan yoki oylik to'lov stavkasi mavjud emas.`
       )
     );
   }

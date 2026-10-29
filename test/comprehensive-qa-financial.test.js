@@ -640,9 +640,12 @@ test('4. Enrollment Dates & Historical Liability Verification', async (t) => {
       assert.equal(octOverview.debtor_count, 7);
     });
 
-    await t.test('December 2026: all students including December enrollee are liable', async () => {
-      const decDebtors = getMonthlyDebtors(ctx.db, '2026-12');
-      // All 8 students liable
+    await t.test('December 2026: all students including December enrollee are liable once month begins', async () => {
+      // In October (before December starts), December debtors is 0
+      assert.equal(getMonthlyDebtors(ctx.db, '2026-12', '2026-10-29').length, 0);
+
+      // Once December begins (reference date 2026-12-01), all 8 students liable
+      const decDebtors = getMonthlyDebtors(ctx.db, '2026-12', '2026-12-01');
       assert.equal(decDebtors.length, 8);
       const decRow = decDebtors.find((d) => d.student_id === sDec.id);
       assert.ok(decRow);
@@ -889,7 +892,15 @@ test('6. Financial Reconciliation Oracle Test (Prompt Section 13 Minimum Fixture
     });
 
     await t.test('Oracle check: Annual report 2026 reconciliation', () => {
-      const annual = getAnnualOverview(ctx.db, '2026');
+      // As of October 2026, future months (Nov, Dec) have 0 expected tuition
+      const annualOct = getAnnualOverview(ctx.db, '2026', '2026-10-29');
+      const novRowOct = annualOct.months.find((m) => m.month === '2026-11');
+      const decRowOct = annualOct.months.find((m) => m.month === '2026-12');
+      assert.equal(novRowOct.expected, 0, 'November expected is 0 as of October 2026');
+      assert.equal(decRowOct.expected, 0, 'December expected is 0 as of October 2026');
+
+      // Once December begins (reference date 2026-12-01), December includes sDec
+      const annual = getAnnualOverview(ctx.db, '2026', '2026-12-01');
       assert.equal(annual.months.length, 12);
 
       const sepRow = annual.months.find((m) => m.month === '2026-09');
@@ -905,7 +916,7 @@ test('6. Financial Reconciliation Oracle Test (Prompt Section 13 Minimum Fixture
       assert.equal(octRow.debt, 2100000);
       assert.equal(octRow.debtor_count, 5);
 
-      // December includes sDec (400,000 UZS)
+      // December includes sDec (400,000 UZS) when evaluated as of December
       const decRow = annual.months.find((m) => m.month === '2026-12');
       assert.equal(decRow.expected, 3250000 + 400000); // 3,650,000 UZS
     });

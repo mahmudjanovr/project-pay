@@ -7,6 +7,16 @@ import { getMonthlyDebtors } from '../services/debtors.js';
 import { getMonthlyOverview, getGroupReports, getAnnualOverview } from '../services/reports.js';
 import { validateReportMonth, validateReportYear } from '../validators/index.js';
 
+function getReferenceDateFromReq(req) {
+  if (typeof req.query.reference_date === 'string') {
+    return req.query.reference_date;
+  }
+  if (typeof req.headers['x-reference-date'] === 'string') {
+    return req.headers['x-reference-date'];
+  }
+  return undefined;
+}
+
 /**
  * Creates a request handler for monthly debtor reports.
  * Reused across GET /debtors and GET /api/reports/debtors.
@@ -26,7 +36,8 @@ export function createDebtorsHandler(db) {
       }
 
       const validMonth = validateReportMonth(monthParam);
-      const debtors = getMonthlyDebtors(db, validMonth);
+      const referenceDate = getReferenceDateFromReq(req);
+      const debtors = getMonthlyDebtors(db, validMonth, referenceDate);
       res.status(200).json(debtors);
     } catch (err) {
       next(err);
@@ -58,7 +69,8 @@ export function createReportRouter(db) {
       }
 
       const validMonth = validateReportMonth(monthParam);
-      const overview = getMonthlyOverview(db, validMonth);
+      const referenceDate = getReferenceDateFromReq(req);
+      const overview = getMonthlyOverview(db, validMonth, referenceDate);
       res.status(200).json(overview);
     } catch (err) {
       next(err);
@@ -77,7 +89,8 @@ export function createReportRouter(db) {
       }
 
       const validMonth = validateReportMonth(monthParam);
-      const groupReports = getGroupReports(db, validMonth);
+      const referenceDate = getReferenceDateFromReq(req);
+      const groupReports = getGroupReports(db, validMonth, referenceDate);
       res.status(200).json(groupReports);
     } catch (err) {
       next(err);
@@ -96,7 +109,8 @@ export function createReportRouter(db) {
       }
 
       const validYear = validateReportYear(yearParam);
-      const annualReport = getAnnualOverview(db, validYear);
+      const referenceDate = getReferenceDateFromReq(req);
+      const annualReport = getAnnualOverview(db, validYear, referenceDate);
       res.status(200).json(annualReport);
     } catch (err) {
       next(err);

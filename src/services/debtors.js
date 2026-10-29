@@ -4,7 +4,7 @@
  */
 
 import { validateReportMonth } from '../validators/index.js';
-import { getMonthDateRange, EFFECTIVE_ENROLLMENT_MONTH_SQL } from '../utils/date.js';
+import { getMonthDateRange, EFFECTIVE_ENROLLMENT_MONTH_SQL, isMonthStarted } from '../utils/date.js';
 
 export const MONTHLY_DEBTORS_QUERY = `
   SELECT
@@ -99,9 +99,11 @@ function getDebtorsStmt(db) {
 
 /**
  * Calculates and returns debtors for a specified report month (YYYY-MM).
+ * For future months that have not started yet, returns an empty array (no debtors).
  *
  * @param {import('better-sqlite3').Database} db
  * @param {string} reportMonth - Canonical YYYY-MM month string.
+ * @param {Date|string} [referenceDate] - Optional reference date to evaluate month start against.
  * @returns {Array<{
  *   id: number,
  *   student_id: number,
@@ -115,8 +117,11 @@ function getDebtorsStmt(db) {
  *   status?: string
  * }>}
  */
-export function getMonthlyDebtors(db, reportMonth) {
+export function getMonthlyDebtors(db, reportMonth, referenceDate = undefined) {
   const validMonth = validateReportMonth(reportMonth);
+  if (!isMonthStarted(validMonth, referenceDate)) {
+    return [];
+  }
   const { stmt, type } = getDebtorsStmt(db);
 
   let rows;

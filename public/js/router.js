@@ -116,7 +116,7 @@ export class Router {
     }
 
     if (!matched) {
-      // Fallback to dashboard
+
       window.location.hash = '#/';
     }
   }

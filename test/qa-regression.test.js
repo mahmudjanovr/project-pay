@@ -441,8 +441,8 @@ test('Backend QA Regressions', async (t) => {
       createPayment(ctx.db, { student_id: partialStudent.id, amount: 200000, payment_date: '9999-12-01' });
 
       const [resDirect, resApi] = await Promise.all([
-        fetch(`${ctx.baseUrl}/debtors?month=9999-12`),
-        fetch(`${ctx.baseUrl}/api/reports/debtors?month=9999-12`)
+        fetch(`${ctx.baseUrl}/debtors?month=9999-12&reference_date=9999-12-01`),
+        fetch(`${ctx.baseUrl}/api/reports/debtors?month=9999-12&reference_date=9999-12-01`)
       ]);
 
       assert.equal(resDirect.status, 200);
@@ -1446,8 +1446,8 @@ test('Final Verification: Debtor Endpoint Parity & Multi-Connection Statement Ca
 
       for (const month of ['2026-09', '2026-10', '2026-11', '2026-12']) {
         const [r1, r2] = await Promise.all([
-          fetch(`${ctx.baseUrl}/debtors?month=${month}`),
-          fetch(`${ctx.baseUrl}/api/reports/debtors?month=${month}`)
+          fetch(`${ctx.baseUrl}/debtors?month=${month}&reference_date=${month}-01`),
+          fetch(`${ctx.baseUrl}/api/reports/debtors?month=${month}&reference_date=${month}-01`)
         ]);
         assert.equal(r1.status, 200);
         assert.equal(r2.status, 200);

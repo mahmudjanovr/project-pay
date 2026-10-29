@@ -129,6 +129,77 @@ export function getCurrentUtcIsoString() {
   return new Date().toISOString();
 }
 
+let globalReferenceDate = null;
+
+/**
+ * Sets a global reference date override (useful for deterministic tests).
+ * Pass null or undefined to clear the override.
+ *
+ * @param {Date|string|null} date
+ */
+export function setGlobalReferenceDate(date) {
+  globalReferenceDate = date ?? null;
+}
+
+/**
+ * Gets the current global reference date override, if any.
+ *
+ * @returns {Date|string|null}
+ */
+export function getGlobalReferenceDate() {
+  return globalReferenceDate;
+}
+
+/**
+ * Resolves the calendar month (YYYY-MM) from a Date instance, ISO/calendar string,
+ * or the current system time.
+ *
+ * @param {Date|string} [referenceDate] - Optional reference date to evaluate against.
+ * @returns {string} Canonical YYYY-MM string.
+ */
+export function getCurrentCalendarMonth(referenceDate) {
+  const target = referenceDate ?? globalReferenceDate ?? process.env.REFERENCE_DATE ?? new Date();
+
+  if (typeof target === 'string') {
+    const trimmed = target.trim();
+    const match = trimmed.match(/^(\d{4})-(0[1-9]|1[0-2])/);
+    if (match) {
+      return `${match[1]}-${match[2]}`;
+    }
+    const d = new Date(trimmed);
+    if (!Number.isNaN(d.getTime())) {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      return `${year}-${month}`;
+    }
+  } else if (target instanceof Date && !Number.isNaN(target.getTime())) {
+    const year = target.getFullYear();
+    const month = String(target.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  }
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+/**
+ * Determines whether a given report month (YYYY-MM) has started relative to a reference date.
+ * A reporting month has started if its YYYY-MM is less than or equal to the current calendar month.
+ *
+ * @param {string} reportMonth - Canonical YYYY-MM report month.
+ * @param {Date|string} [referenceDate] - Optional reference date.
+ * @returns {boolean} True if reportMonth has started, false if it is a future month.
+ */
+export function isMonthStarted(reportMonth, referenceDate) {
+  if (!isValidReportMonth(reportMonth)) {
+    return false;
+  }
+  const currentMonth = getCurrentCalendarMonth(referenceDate);
+  return reportMonth <= currentMonth;
+}
+
 /**
  * Canonical SQL expression that resolves a student's effective enrollment month (YYYY-MM).
  * Strictly validates that enrollment_date is a real calendar date (YYYY-MM-DD or YYYY-MM),

@@ -6,7 +6,7 @@
 
 import { validateReportMonth, validateReportYear } from '../validators/index.js';
 import { getMonthlyDebtors } from './debtors.js';
-import { getMonthDateRange, EFFECTIVE_ENROLLMENT_MONTH_SQL } from '../utils/date.js';
+import { getMonthDateRange, EFFECTIVE_ENROLLMENT_MONTH_SQL, isMonthStarted } from '../utils/date.js';
 
 const UZBEK_MONTH_NAMES = [
   'Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun',
@@ -15,28 +15,38 @@ const UZBEK_MONTH_NAMES = [
 
 /**
  * Returns overall monthly financial metrics for a selected billing month.
+ * For future months that have not started yet, liabilities, debt, pending amounts,
+ * and debtor counts are zero, while actual confirmed payments and cash receipts are preserved.
  *
  * @param {import('better-sqlite3').Database} db
  * @param {string} reportMonth - Format: YYYY-MM
+ * @param {Date|string} [referenceDate] - Optional reference date to evaluate month start against.
  * @returns {Object}
  */
-export function getMonthlyOverview(db, reportMonth) {
+export function getMonthlyOverview(db, reportMonth, referenceDate = undefined) {
   const validMonth = validateReportMonth(reportMonth);
+  const monthStarted = isMonthStarted(validMonth, referenceDate);
 
-  // 1. Liable fee-paying students count and total expected tuition
-  const liableStmt = db.prepare(`
-    SELECT
-      COUNT(*) AS total_students,
-      COUNT(CASE WHEN monthly_fee > 0 THEN 1 END) AS fee_paying_students,
-      COALESCE(SUM(monthly_fee), 0) AS total_expected
-    FROM students s
-    WHERE (${EFFECTIVE_ENROLLMENT_MONTH_SQL}) <= ?;
-  `);
-  const liableInfo = liableStmt.get(validMonth);
-  const totalExpected = Number(liableInfo.total_expected);
-  const feePayingStudents = Number(liableInfo.fee_paying_students);
+  // 1. Liable fee-paying students count and total expected tuition (only for started months)
+  let totalExpected = 0;
+  let feePayingStudents = 0;
+
+  if (monthStarted) {
+    const liableStmt = db.prepare(`
+      SELECT
+        COUNT(*) AS total_students,
+        COUNT(CASE WHEN monthly_fee > 0 THEN 1 END) AS fee_paying_students,
+        COALESCE(SUM(monthly_fee), 0) AS total_expected
+      FROM students s
+      WHERE (${EFFECTIVE_ENROLLMENT_MONTH_SQL}) <= ?;
+    `);
+    const liableInfo = liableStmt.get(validMonth);
+    totalExpected = Number(liableInfo.total_expected);
+    feePayingStudents = Number(liableInfo.fee_paying_students);
+  }
 
   // 2. Confirmed & pending payment sums for this billing month
+  // Confirmed revenue is preserved across all months; pending liabilities only exist once month has started
   const paymentsStmt = db.prepare(`
     SELECT
       COALESCE(SUM(CASE WHEN COALESCE(p.status, 'confirmed') = 'confirmed' THEN p.amount ELSE 0 END), 0) AS total_confirmed,
@@ -47,10 +57,10 @@ export function getMonthlyOverview(db, reportMonth) {
   `);
   const paymentInfo = paymentsStmt.get(validMonth);
   const totalConfirmed = Number(paymentInfo.total_confirmed);
-  const totalPending = Number(paymentInfo.total_pending);
-  const pendingCount = Number(paymentInfo.pending_count);
+  const totalPending = monthStarted ? Number(paymentInfo.total_pending) : 0;
+  const pendingCount = monthStarted ? Number(paymentInfo.pending_count) : 0;
 
-  // 3. Cash received by actual payment date in this calendar month
+  // 3. Cash received by actual payment date in this calendar month (always preserved)
   const { startOfMonth, endOfMonth } = getMonthDateRange(validMonth);
   const cashStmt = db.prepare(`
     SELECT COALESCE(SUM(amount), 0) AS total_cash
@@ -62,7 +72,7 @@ export function getMonthlyOverview(db, reportMonth) {
   const totalCashReceived = Number(cashRow.total_cash);
 
   // 4. Debtors from the authoritative debtor calculation engine
-  const debtors = getMonthlyDebtors(db, validMonth);
+  const debtors = getMonthlyDebtors(db, validMonth, referenceDate);
   let totalDebtBigInt = 0n;
   for (const d of debtors) {
     if (Number.isSafeInteger(d.debt) && d.debt > 0) {
@@ -71,12 +81,12 @@ export function getMonthlyOverview(db, reportMonth) {
   }
   const totalDebt = Number(totalDebtBigInt);
   const debtorCount = debtors.length;
-  const fullyPaidCount = Math.max(0, feePayingStudents - debtorCount);
+  const fullyPaidCount = monthStarted ? Math.max(0, feePayingStudents - debtorCount) : 0;
 
   // Collection percentage (0 - 100)
   const collectionRate = totalExpected > 0
     ? Math.min(100, Math.round((totalConfirmed / totalExpected) * 100))
-    : 100;
+    : (monthStarted ? 100 : (totalConfirmed > 0 ? 100 : 0));
 
   return {
     month: validMonth,
@@ -98,10 +108,12 @@ export function getMonthlyOverview(db, reportMonth) {
  *
  * @param {import('better-sqlite3').Database} db
  * @param {string} reportMonth - Format: YYYY-MM
+ * @param {Date|string} [referenceDate] - Optional reference date to evaluate month start against.
  * @returns {Array<Object>}
  */
-export function getGroupReports(db, reportMonth) {
+export function getGroupReports(db, reportMonth, referenceDate = undefined) {
   const validMonth = validateReportMonth(reportMonth);
+  const monthStarted = isMonthStarted(validMonth, referenceDate);
 
   // Load all groups
   const groups = db.prepare('SELECT id, name FROM groups ORDER BY name COLLATE NOCASE ASC').all();
@@ -142,15 +154,20 @@ export function getGroupReports(db, reportMonth) {
     if (!studentMap.has(gid)) {
       studentMap.set(gid, []);
     }
+    const totalPaid = Number(s.total_paid);
+    const pendingPaid = monthStarted ? Number(s.pending_paid) : 0;
+    const debt = monthStarted ? Number(s.debt) : 0;
+    const status = s.monthly_fee === 0 ? 'exempt'
+          : debt === 0 ? (totalPaid > 0 ? 'paid' : (monthStarted ? 'paid' : 'unpaid'))
+          : totalPaid === 0 ? (pendingPaid > 0 ? 'pending' : 'unpaid')
+          : 'partial';
+
     studentMap.get(gid).push({
       ...s,
-      total_paid: Number(s.total_paid),
-      pending_paid: Number(s.pending_paid),
-      debt: Number(s.debt),
-      status: s.monthly_fee === 0 ? 'exempt'
-            : s.debt === 0 ? 'paid'
-            : s.total_paid === 0 ? (s.pending_paid > 0 ? 'pending' : 'unpaid')
-            : 'partial'
+      total_paid: totalPaid,
+      pending_paid: pendingPaid,
+      debt: debt,
+      status: status
     });
   }
 
@@ -165,13 +182,15 @@ export function getGroupReports(db, reportMonth) {
     let debtorCount = 0;
 
     for (const st of groupStudents) {
-      expectedSum += BigInt(st.monthly_fee);
-      confirmedSum += BigInt(st.total_paid);
-      pendingSum += BigInt(st.pending_paid);
-      debtSum += BigInt(st.debt);
-      if (st.monthly_fee > 0 && st.debt > 0) {
-        debtorCount += 1;
+      if (monthStarted) {
+        expectedSum += BigInt(st.monthly_fee);
+        debtSum += BigInt(st.debt);
+        pendingSum += BigInt(st.pending_paid);
+        if (st.monthly_fee > 0 && st.debt > 0) {
+          debtorCount += 1;
+        }
       }
+      confirmedSum += BigInt(st.total_paid);
     }
 
     result.push({
@@ -197,13 +216,15 @@ export function getGroupReports(db, reportMonth) {
     let unassignedDebtors = 0;
 
     for (const st of unassigned) {
-      unassignedExpected += BigInt(st.monthly_fee);
-      unassignedConfirmed += BigInt(st.total_paid);
-      unassignedPending += BigInt(st.pending_paid);
-      unassignedDebt += BigInt(st.debt);
-      if (st.monthly_fee > 0 && st.debt > 0) {
-        unassignedDebtors += 1;
+      if (monthStarted) {
+        unassignedExpected += BigInt(st.monthly_fee);
+        unassignedDebt += BigInt(st.debt);
+        unassignedPending += BigInt(st.pending_paid);
+        if (st.monthly_fee > 0 && st.debt > 0) {
+          unassignedDebtors += 1;
+        }
       }
+      unassignedConfirmed += BigInt(st.total_paid);
     }
 
     result.push({
@@ -227,9 +248,10 @@ export function getGroupReports(db, reportMonth) {
  *
  * @param {import('better-sqlite3').Database} db
  * @param {string} reportYear - Format: YYYY
+ * @param {Date|string} [referenceDate] - Optional reference date to evaluate month start against.
  * @returns {{ year: string, months: Array<Object>, totals: Object }}
  */
-export function getAnnualOverview(db, reportYear) {
+export function getAnnualOverview(db, reportYear, referenceDate = undefined) {
   const validYear = validateReportYear(reportYear);
 
   const months = [];
@@ -244,7 +266,7 @@ export function getAnnualOverview(db, reportYear) {
     const monthStr = `${validYear}-${monthNum}`;
     const monthName = UZBEK_MONTH_NAMES[m - 1];
 
-    const overview = getMonthlyOverview(db, monthStr);
+    const overview = getMonthlyOverview(db, monthStr, referenceDate);
     const cashReceived = overview.total_cash_received;
 
     totalExpected += BigInt(overview.total_expected);
